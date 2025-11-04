@@ -23,7 +23,7 @@ def set_params():
 
     # # # # # # # # Hyperparameters # # # # # # # #
     learning_rate = 1e-3
-    epochs = 500
+    epochs = 10 # 500
 
     # # # # # # # # Data path # # # # # # # #
 
