@@ -1,0 +1,21 @@
+# Ignora tutte le cartelle che contengono un punto
+.*/*
+# .* → qualsiasi cartella che inizia con un punto
+# /* → tutto il contenuto della cartella
+
+*github*/
+# *github* qualsiasi cartella che contiene github
+# cloni di altri progetti
+
+*non_lin_sys_id*/*
+# *github* qualsiasi cartella che contiene github
+# python virtual environment
+
+*__*/*
+# *__* qualsiasi cartella che contiene __
+# cloni di altri progetti
+
+
+mt_u_from_glycemia.py
+
+*.*       # ignora tutti i file che contengono almeno un punto
