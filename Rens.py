@@ -221,7 +221,7 @@ class REN_IQC_gamma(nn.Module):
         self, dim_in: int, dim_out: int, dim_internal: int,
         dim_nl: int, internal_state_init = None, y_init = None,
         initialization_std: float = 0.5, pos_def_tol: float = 0.001, gammat=None, QR_fun=None, IQC_type='l2_gain',
-        Q=None, R=None, S=None
+        Q=None, R=None, S=None, device='cpu'
     ):
         """
         Args:
@@ -235,6 +235,8 @@ class REN_IQC_gamma(nn.Module):
             gamma (float, optional):  Defaults to 1.
         """
         super().__init__()
+        
+        self.device = device
 
         # set dimensions
         self.dim_in = dim_in
@@ -292,33 +294,41 @@ class REN_IQC_gamma(nn.Module):
         
         
         self._init_trainable_params(initialization_std)
+        
+        self.to(device)
 
 
         # mask
         # in pytorch the method register_buffer is used to define non-trainable parameters
-        self.register_buffer('eye_mask_min', torch.eye(min(dim_in, dim_out)))
-        self.register_buffer('eye_mask_dim_in', torch.eye(dim_in))
-        self.register_buffer('eye_mask_dim_out', torch.eye(dim_out))
-        self.register_buffer('eye_mask_dim_state', torch.eye(dim_internal))
-        self.register_buffer('eye_mask_H', torch.eye(2 * dim_internal + dim_nl))
-        self.register_buffer('zeros_mask_S', torch.zeros(dim_in, dim_out))
-        self.register_buffer('zeros_mask_Q', torch.zeros(dim_out, dim_out))
-        self.register_buffer('zeros_mask_R', torch.zeros(dim_in, dim_in))
-        self.register_buffer('zeros_mask_so', torch.zeros(dim_internal, dim_out))
-        self.register_buffer('eye_mask_w', torch.eye(dim_nl))
+        self.register_buffer('eye_mask_min', torch.eye(min(dim_in, dim_out), device=device))
+        self.register_buffer('eye_mask_dim_in', torch.eye(dim_in, device=device))
+        self.register_buffer('eye_mask_dim_out', torch.eye(dim_out, device=device))
+        self.register_buffer('eye_mask_dim_state', torch.eye(dim_internal, device=device))
+        self.register_buffer('eye_mask_H', torch.eye(2 * dim_internal + dim_nl, device=device))
+        self.register_buffer('zeros_mask_S', torch.zeros(dim_in, dim_out, device=device))
+        self.register_buffer('zeros_mask_Q', torch.zeros(dim_out, dim_out, device=device))
+        self.register_buffer('zeros_mask_R', torch.zeros(dim_in, dim_in, device=device))
+        self.register_buffer('zeros_mask_so', torch.zeros(dim_internal, dim_out, device=device))
+        self.register_buffer('eye_mask_w', torch.eye(dim_nl, device=device))
 
         # initialize internal state
         if internal_state_init is None:
             if y_init is None:
-                self.x = torch.zeros(1, 1, dim_internal)
+                self.x = torch.zeros(1, 1, dim_internal, device=device)
             else:
-                y_init = y_init.reshape(1, -1)
-                self.x = torch.linalg.lstsq(self.C2, y_init.to(self.C2.device).squeeze(1).T)[0].T
+                # assicurati che self.C2 sia sul device giusto
+                self.C2 = nn.Parameter(self.C2.data.to(device))
+                y_init = y_init.reshape(1, -1).to(device)
+                self.x = torch.linalg.lstsq(self.C2, y_init.squeeze(1).T)[0].T
         else:
             assert isinstance(internal_state_init, torch.Tensor)
-            self.x = internal_state_init.reshape(1, 1, dim_internal)
+            self.x = internal_state_init.reshape(1, 1, dim_internal).to(device)
+
+                    
+        self.x = self.x.to(device)
         self.register_buffer('x_init', self.x.detach().clone())
-        self.register_buffer('y_init', F.linear(self.x_init, self.C2))
+        self.register_buffer('y_init', F.linear(self.x_init, self.C2).to(device))
+        
 
     def _update_model_param(self):
         """

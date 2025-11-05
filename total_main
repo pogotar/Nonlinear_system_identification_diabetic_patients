@@ -1,0 +1,160 @@
+import os
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import torch
+import nbformat
+from nbformat.v4 import new_notebook, new_code_cell
+import papermill as pm
+
+
+
+# -----------------------------
+# Config
+# -----------------------------
+ORIG_NB = "single_main.ipynb"  # notebook sorgente
+TAGS_TO_RUN = ["imports", 
+               "set_params",
+               "cl_data",
+                "plot_1",
+               "plot_2",
+               "strat_1_def_ren",
+               "strat_1_train_valid",
+               "plot_strat_1_test_1"]  # tag delle celle da eseguire
+NUM_PATIENTS = 10                 # numero pazienti
+FORCE_CPU = True  # True = tutti i pazienti usano solo CPU
+
+# -----------------------------
+
+(os.makedirs("output", exist_ok=True))
+
+# Numero di GPU disponibili
+num_gpus = torch.cuda.device_count()
+print(f"Numero di GPU disponibili: {num_gpus}")
+
+# Lista dei device CUDA disponibili
+gpu_devices = [f"cuda:{i}" for i in range(num_gpus)]
+
+# CPU sempre disponibile
+cpu_device = "cpu"
+
+all_devices = gpu_devices + [cpu_device]
+print(f"Tutti i device disponibili: {all_devices}")
+
+
+patients = list(range(1,NUM_PATIENTS+1))
+
+if FORCE_CPU or num_gpus == 0:
+    print("Forzando l'uso della CPU per tutti i pazienti.")
+    assignments = [(p, cpu_device) for p in patients]
+else:
+    print("Assegnazione pazienti a GPU e CPU...")
+
+    # Numero di job per device (proporzionale)
+    gpu_share = NUM_PATIENTS * 2 // 3  # circa 2/3 pazienti alle GPU
+    cpu_share = NUM_PATIENTS - gpu_share
+
+    # Distribuzione pazienti su GPU
+    gpu_patients = patients[:gpu_share]
+    cpu_patients = patients[gpu_share:]
+
+    assignments = []
+
+    # Assegna GPU in round-robin
+    for i, p in enumerate(gpu_patients):
+        device = gpu_devices[i % len(gpu_devices)]
+        assignments.append((p, device))
+
+    # Assegna CPU
+    for p in cpu_patients:
+        assignments.append((p, cpu_device))
+
+# Visualizza assegnazioni
+for p, d in assignments:
+    print(f"Patient {p} -> {d}")
+
+
+
+# -----------------------------
+# Funzione di esecuzione notebook
+# -----------------------------
+def extract_param_cell(cells):
+    for c in cells:
+        if "parameters" in c.metadata.get("tags", []):
+            return c
+    # fallback
+    for c in cells:
+        if "# Parameters" in c.source:
+            return c
+    return None
+
+def build_temp_notebook(orig_nb_path, tags_to_include, temp_path):
+    nb = nbformat.read(orig_nb_path, as_version=4)
+    new_nb = new_notebook()
+
+    # Copia kernel info dal notebook originale
+    if "kernelspec" in nb.metadata:
+        new_nb.metadata.kernelspec = nb.metadata.kernelspec
+    if "language_info" in nb.metadata:
+        new_nb.metadata.language_info = nb.metadata.language_info
+
+    for tag in tags_to_include:
+        if tag == "parameters":
+            # crea o copia cella parameters
+            param_cell = extract_param_cell(nb.cells)
+            if param_cell is None:
+                param_cell = new_code_cell("# Parameters\npatient=None\ndevice='cpu'")
+                param_cell.metadata["tags"] = ["parameters"]
+            new_nb.cells.append(param_cell)
+        else:
+            # copia la prima cella che ha il tag
+            for c in nb.cells:
+                if tag in c.metadata.get("tags", []):
+                    new_nb.cells.append(c)
+                    break  # solo la prima cella con quel tag
+
+    nbformat.write(new_nb, temp_path)
+    return temp_path
+
+def run_notebook_for(patient_id, device, tags_to_run):
+    """Costruisce notebook temporaneo e lo esegue con Papermill"""
+    with tempfile.NamedTemporaryFile(suffix=".ipynb", delete=False) as tf:
+        temp_nb_path = tf.name
+    try:
+        build_temp_notebook(ORIG_NB, tags_to_run, temp_nb_path)
+        out_nb = os.path.join("output", f"train_patient_{patient_id}_{device.replace(':','_')}.ipynb")
+        print(f"[launch] patient {patient_id} on {device} -> {out_nb}")
+        pm.execute_notebook(
+            temp_nb_path,
+            out_nb,
+            parameters={"patient": patient_id, "device": device}
+        )
+        print(f"[done] patient {patient_id} on {device}")
+        return out_nb
+    finally:
+        # rimuovi notebook temporaneo
+        try:
+            os.remove(temp_nb_path)
+        except Exception:
+            pass
+
+# -----------------------------
+# Parallel execution
+# -----------------------------
+max_workers = len(all_devices)
+if FORCE_CPU or num_gpus == 0:
+    max_workers = 1 # limita a 2 thread se solo CPU
+results = []
+
+with ThreadPoolExecutor(max_workers=max_workers) as ex:
+    futures = {ex.submit(run_notebook_for, p, d, TAGS_TO_RUN): (p, d) for p, d in assignments}
+    for fut in as_completed(futures):
+        p, d = futures[fut]
+        try:
+            res = fut.result()
+            results.append((p, d, res))
+        except Exception as e:
+            print(f"[error] Job {p} on {d} failed: {e}")
+
+print("Tutti i job terminati.")
+for p, d, out in results:
+    print(f"Patient {p} -> {d} -> {out}")
