@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from torch.utils.data import Dataset
 
 class Parameter:
+    
+    torch.set_default_dtype(torch.float32) 
     def __init__(self, patient):
         self.patient = patient
         self.PID_par = self.PID_par()
@@ -34,8 +36,8 @@ class Parameter:
             self.CR_values_not_norm = torch.from_numpy(CRtv_data['CRtv']['values'][0, patient - 1]).double()
 
     class pumpParameter:
-        quantum = 0.05
-        saturationMax = 12
+        quantum = torch.tensor([0.05])
+        saturationMax = torch.tensor([12.0])
 
 
 class PID_functions:
@@ -68,6 +70,8 @@ class PID_functions:
         saturation_error : float
             Updated saturation error
         """
+        
+        torch.set_default_dtype(torch.float32) 
         # Total amount
         amount = bolus + basal / 60 * ts_measurement  # UI
 
@@ -76,19 +80,24 @@ class PID_functions:
         quanto = pumpParameter.quantum  # UI
 
         # Rounding to closest quanto taking previous error into account
-        if quanto == 0:
+        if torch.all(quanto == 0):
             # Quanto=0 --> Ideal pump (for software test)
             bolus = amount
         else:
             bolus = quanto * torch.round((amount + saturation_error) / quanto)  # UI
 
         # Store remaining bolus if bolus > saturationMax
-        if bolus > pumpSaturation:
-            bolus = pumpSaturation
+        
+        # Saturation check
+        bolus = torch.minimum(bolus, pumpSaturation)
 
         saturation_error = amount + saturation_error - bolus  # UI
 
-        basal = 0
+        basal = 0.0
+        
+        bolus = bolus.to(torch.float32)
+        basal = torch.tensor(basal, dtype=torch.float32)        
+        saturation_error = saturation_error.to(torch.float32)
 
         return bolus, basal, saturation_error
 

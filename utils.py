@@ -2,9 +2,11 @@ import torch
 
 def set_params():
     # # # # # # # # Parameters # # # # # # # #
+    
+    torch.set_default_dtype(torch.float32) 
 
     #Model
-    x0 = torch.tensor([5.0, 5.0])  # Initial state
+    x0 = torch.tensor([0.01, 0.01])  # Initial state
     input_dim = [1, 1] # input dimensions
     output_dim = [1, 1] # output dimensions
 
@@ -15,7 +17,7 @@ def set_params():
     y_init = torch.tensor([0.0, 0.0])
 
     IQC_type = ['monotone', 'monotone'] # IQC constraint type: 'l2_gain', 'monotone', 'passive'
-    gamma = torch.tensor([0.1, 0.1])  # for IQC constraints
+    gamma = torch.tensor([0.3, 0.02])  # for IQC constraints
 
     use_noise = True
 
@@ -23,7 +25,7 @@ def set_params():
 
     # # # # # # # # Hyperparameters # # # # # # # #
     learning_rate = 1e-3
-    epochs = 10 # 500
+    epochs = 500 # 500
 
     # # # # # # # # Data path # # # # # # # #
 
@@ -45,6 +47,8 @@ def set_params():
 
 def set_QR(gamma, input_dim, output_dim, IQC_type):
     # IQC constraints
+    
+    torch.set_default_dtype(torch.float32) 
         
     if IQC_type == 'l2_gain':
         # incremental L2 gain constraints
@@ -53,10 +57,10 @@ def set_QR(gamma, input_dim, output_dim, IQC_type):
         S = torch.zeros(output_dim, input_dim)  # 0
 
     elif IQC_type == 'monotone':
-        eps = 1e-6 
+        eps = 1e-4
 
         # monotone on l2
-        Q = torch.zeros(output_dim, output_dim) -eps # 0
+        Q = torch.zeros(output_dim, output_dim) -eps * torch.eye(output_dim) # 0
         R = - 2 * gamma * torch.eye(input_dim, input_dim)  # -2 nu I
         S = torch.eye(output_dim, input_dim)  # I
 

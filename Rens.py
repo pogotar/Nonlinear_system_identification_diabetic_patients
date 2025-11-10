@@ -273,33 +273,25 @@ class REN_IQC_gamma(nn.Module):
         self.D12_shape = (dim_nl, dim_in)
 
         self.s = np.max((dim_in, dim_out))
-        self.X3_shape = (self.s, self.s)
-        self.Y3_shape = (self.s, self.s)
-        self.Z3_shape = (abs(dim_out - dim_in), min(dim_out, dim_in))
-        
+        # self.X3_shape = (self.s, self.s)
+        # self.Y3_shape = (self.s, self.s)
+        # self.Z3_shape = (abs(dim_out - dim_in), min(dim_out, dim_in))
+
         self.gamma_shape = (1, 1)
         self.gammat = gammat
-
-
+        self.device = device
 
         # define trainable params
-        self.training_param_names = ['X', 'Y', 'B2', 'C2', 'D21', 'D12','X3','Y3','Z3']
-        
-        
-        # Optionally define a trainable gamma
+        self.training_param_names = ['X', 'Y', 'B2', 'C2', 'D21', 'D12']
         if self.gammat is None:
             self.training_param_names.append('gamma')
         else:
             self.gamma = gammat
-        
-        
+
+        # initialize trainable parameters
         self._init_trainable_params(initialization_std)
-        
-        self.to(device)
 
-
-        # mask
-        # in pytorch the method register_buffer is used to define non-trainable parameters
+        # register buffers (non-trainable masks)
         self.register_buffer('eye_mask_min', torch.eye(min(dim_in, dim_out), device=device))
         self.register_buffer('eye_mask_dim_in', torch.eye(dim_in, device=device))
         self.register_buffer('eye_mask_dim_out', torch.eye(dim_out, device=device))
@@ -312,22 +304,27 @@ class REN_IQC_gamma(nn.Module):
         self.register_buffer('eye_mask_w', torch.eye(dim_nl, device=device))
 
         # initialize internal state
-        if internal_state_init is None:
-            if y_init is None:
-                self.x = torch.zeros(1, 1, dim_internal, device=device)
-            else:
-                # assicurati che self.C2 sia sul device giusto
-                self.C2 = nn.Parameter(self.C2.data.to(device))
-                y_init = y_init.reshape(1, -1).to(device)
-                self.x = torch.linalg.lstsq(self.C2, y_init.squeeze(1).T)[0].T
-        else:
+        if internal_state_init is not None:
             assert isinstance(internal_state_init, torch.Tensor)
-            self.x = internal_state_init.reshape(1, 1, dim_internal).to(device)
+            self.x = internal_state_init.reshape(1, 1, dim_internal)
+        elif y_init is not None:
+            y_init = y_init.reshape(1, -1)
+            self.C2 = nn.Parameter(self.C2.data)  # C2 already inizializzato come Parameter
+            self.x = torch.linalg.lstsq(self.C2, y_init.squeeze(1).T)[0].T.unsqueeze(0).unsqueeze(0)
+        else:
+            self.x = torch.zeros(1, 1, dim_internal)
 
-                    
-        self.x = self.x.to(device)
+        # register initial state buffers
         self.register_buffer('x_init', self.x.detach().clone())
-        self.register_buffer('y_init', F.linear(self.x_init, self.C2).to(device))
+        y_init_calc = F.linear(self.x_init, self.C2)
+        y_init_calc = y_init_calc.view(1, 1, self.dim_out)
+        self.register_buffer('y_init', y_init_calc)
+
+        # move everything to device
+        self.to(device)
+
+        # esplicito solo stato interno (già incluso in buffers), ma per sicurezza
+        self.x = self.x.to(device)
         
 
     def _update_model_param(self):
@@ -345,36 +342,37 @@ class REN_IQC_gamma(nn.Module):
             self.S = torch.zeros(dim_out, dim_in)  # 0
 
 
-        M = F.linear(self.X3.T, self.X3.T) + self.Y3 - self.Y3.T + F.linear(self.Z3.T,
-                                                                            self.Z3.T) + self.epsilon * self.eye_mask_min
-        if self.dim_out >= self.dim_in:
-            N = torch.vstack((F.linear(self.eye_mask_dim_in - M,
-                                       torch.inverse(self.eye_mask_dim_in + M).T),
-                              -2 * F.linear(self.Z3, torch.inverse(self.eye_mask_dim_in + M).T)))
-        else:
-            N = torch.hstack((F.linear(torch.inverse(self.eye_mask_dim_out + M),
-                                       (self.eye_mask_dim_out - M).T),
-                              -2 * F.linear(torch.inverse(self.eye_mask_dim_out + M), self.Z3)))
+        # M = F.linear(self.X3.T, self.X3.T) + self.Y3 - self.Y3.T + F.linear(self.Z3.T,
+        #                                                                     self.Z3.T) + self.epsilon * self.eye_mask_min
+        # if self.dim_out >= self.dim_in:
+        #     N = torch.vstack((F.linear(self.eye_mask_dim_in - M,
+        #                                torch.inverse(self.eye_mask_dim_in + M).T),
+        #                       -2 * F.linear(self.Z3, torch.inverse(self.eye_mask_dim_in + M).T)))
+        # else:
+        #     N = torch.hstack((F.linear(torch.inverse(self.eye_mask_dim_out + M),
+        #                                (self.eye_mask_dim_out - M).T),
+        #                       -2 * F.linear(torch.inverse(self.eye_mask_dim_out + M), self.Z3)))
 
-        Lq = torch.linalg.cholesky(-self.Q).T
-        Lr = torch.linalg.cholesky(self.R - torch.matmul(self.S, torch.matmul(torch.inverse(self.Q), self.S.T))).T
-        self.D22 = -torch.matmul(torch.inverse(self.Q), self.S.T) + torch.matmul(torch.inverse(Lq),
-                                                                                 torch.matmul(N, Lr))
+        # Lq = torch.linalg.cholesky(-self.Q).T
+        #Lr = torch.linalg.cholesky(self.R - torch.matmul(self.S, torch.matmul(torch.inverse(self.Q), self.S.T))).T
+
+        # self.D22 = -torch.matmul(torch.inverse(self.Q), self.S.T) + torch.matmul(torch.inverse(Lq), torch.matmul(N, Lr))
+
         # Calculate psi_r:
-        R_cal = self.R + torch.matmul(self.S, self.D22) + torch.matmul(self.S, self.D22).T + torch.matmul(self.D22.T,
-                                                                                                          torch.matmul(
-                                                                                                              self.Q,
-                                                                                                              self.D22))
-        R_cal_inv = torch.inverse(R_cal)
-        C2_cal = torch.matmul(torch.matmul(self.D22.T, self.Q) + self.S, self.C2)
-        D21_cal = torch.matmul(torch.matmul(self.D22.T, self.Q) + self.S, self.D21) - self.D12.T
-        vec_r = torch.cat((C2_cal.T, D21_cal.T, self.B2), dim=0)
-        psi_r = torch.matmul(vec_r, torch.matmul(R_cal_inv, vec_r.T))
+        # R_cal = self.R + torch.matmul(self.S, self.D22) + torch.matmul(self.S, self.D22).T + torch.matmul(self.D22.T,
+        #                                                                                                   torch.matmul(
+        #                                                                                                       self.Q,
+        #                                                                                                       self.D22))
+        # R_cal_inv = torch.inverse(R_cal)
+        # C2_cal = torch.matmul(torch.matmul(self.D22.T, self.Q) + self.S, self.C2)
+        # D21_cal = torch.matmul(torch.matmul(self.D22.T, self.Q) + self.S, self.D21) - self.D12.T
+        # vec_r = torch.cat((C2_cal.T, D21_cal.T, self.B2), dim=0)
+        # psi_r = torch.matmul(vec_r, torch.matmul(R_cal_inv, vec_r.T))
         # Calculate psi_q:
-        vec_q = torch.cat((self.C2.T, self.D21.T, self.zeros_mask_so), dim=0)
-        psi_q = torch.matmul(vec_q, torch.matmul(self.Q, vec_q.T))
+        # vec_q = torch.cat((self.C2.T, self.D21.T, self.zeros_mask_so), dim=0)
+        # psi_q = torch.matmul(vec_q, torch.matmul(self.Q, vec_q.T))
         # Create H matrix:
-        H = torch.matmul(self.X.T, self.X) + self.epsilon * self.eye_mask_H + psi_r - psi_q
+        H = torch.matmul(self.X.T, self.X) + self.epsilon * self.eye_mask_H # + psi_r - psi_q
         h1, h2, h3 = torch.split(H, [dim_internal, dim_nl, dim_internal], dim=0)
         H11, H12, H13 = torch.split(h1, [dim_internal, dim_nl, dim_internal], dim=1)
         H21, H22, _ = torch.split(h2, [dim_internal, dim_nl, dim_internal], dim=1)
@@ -421,11 +419,31 @@ class REN_IQC_gamma(nn.Module):
         self.x = F.linear(F.linear(self.x, self.F) + F.linear(w, self.B1) + F.linear(u_in, self.B2), self.E_inv)
 
         # compute output
-        y_out = F.linear(self.x, self.C2) + F.linear(w, self.D21) + F.linear(u_in, self.D22)
+        y_out = F.linear(self.x, self.C2) + F.linear(w, self.D21) # + F.linear(u_in, self.D22)
         return y_out
 
-    def reset(self):
-        self.x = self.x_init  # reset the REN state to the initial value
+    def reset(self, x0=None, batch_size=None):
+        """
+        Reset compatibile con ClosedLoopSystem.
+        Se x0 è fornito (shape (batch, 1, dim_internal) o (1, 1, dim_internal)),
+        lo utilizza come stato; altrimenti usa self.x_init (replicato per batch se necessario).
+        """
+        if x0 is not None:
+            # accetta sia (1,1,dim) sia (batch,1,dim)
+            self.x = x0.clone().to(self.device)
+        else:
+            # default behaviour: reset to x_init, replicate to batch_size se richiesto
+            if batch_size is None:
+                self.x = self.x_init.clone().to(self.device)
+            else:
+                self.x = self.x_init.detach().clone().repeat(batch_size, 1, 1).to(self.device)
+
+    def y0_from_x0(self, x0: torch.Tensor) -> torch.Tensor:
+        """
+        Given an internal state x0 (batch,1,dim_internal) returns the corresponding y0.
+        We assume initial w = 0 and u = 0, so y0 = C2 @ x0 (linear part).
+        """
+        return F.linear(x0, self.C2)
 
 
     def run(self, u_in):
@@ -471,4 +489,92 @@ class REN_IQC_gamma(nn.Module):
 
     def __call__(self, u_in):
         return self.run(u_in)
+    
+    
+    
+class DualREN(nn.Module):
+    """
+    A wrapper module combining two REN models.
+    It takes two separate inputs and outputs the difference:
+        y_hat = REN_0(u0) - REN_1(u1)
+    """
+
+    def __init__(self, REN_0: nn.Module, REN_1: nn.Module, device='cpu'):
+        super().__init__()
+        
+        # buffer for the cobined internal state
+        self.x = None
+        self.y = None
+
+        self.REN_0 = REN_0.to(device)
+        self.REN_1 = REN_1.to(device)
+        self.device = device
+        self.to(device)
+        
+
+
+    def forward(self, u0_in: torch.Tensor, u1_in: torch.Tensor) -> torch.Tensor:
+        """
+        Esegue UN SOLO passo temporale di entrambe le REN e restituisce la differenza tra i loro output.
+        Args:
+            u0_in: input per REN_0 (batch, 1, dim_in_0)
+            u1_in: input per REN_1 (batch, 1, dim_in_1)
+        Returns:
+            y_out: output combinato (batch, 1, dim_out)
+        """
+        y0 = self.REN_0.forward(u0_in)
+        y1 = self.REN_1.forward(u1_in)
+        y_out = y0 - y1
+
+        # Aggiorna lo stato combinato
+        self.x = torch.cat((self.REN_0.x, self.REN_1.x), dim=-1)
+        return y_out
+    
+    def run(self, u0_seq: torch.Tensor, u1_seq: torch.Tensor) -> torch.Tensor:
+        """
+        Esegue il forward delle due REN su tutta una sequenza temporale.
+        Usa il metodo forward() interno passo per passo.
+        Args:
+            u0_seq: input sequence per REN_0 (batch, time, dim_in_0)
+            u1_seq: input sequence per REN_1 (batch, time, dim_in_1)
+        Returns:
+            y_seq: output sequence combinato (batch, time, dim_out)
+        """
+        self.reset()  # reset degli stati iniziali
+
+        # il primo output parte da y_init
+        y_init = self.REN_0.y_init.detach().clone().repeat(u0_seq.shape[0], 1, 1) \
+                - self.REN_1.y_init.detach().clone().repeat(u1_seq.shape[0], 1, 1)
+        y_seq = [y_init]
+
+        # loop temporale
+        for t in range(u0_seq.shape[1] - 1):
+            y_t = self.forward(u0_seq[:, t:t+1, :], u1_seq[:, t:t+1, :])
+            y_seq.append(y_t)
+
+        y_seq = torch.cat(y_seq, dim=1)
+        return y_seq
+    
+    def y0_from_x0(self, x0: torch.Tensor) -> torch.Tensor:
+        """Converte lo stato interno combinato in y0, come differenza delle due REN."""
+        # suddividi x0 nelle due parti corrispondenti
+        d0 = self.REN_0.x.shape[-1]
+        x0_0 = x0[..., :d0]
+        x0_1 = x0[..., d0:]
+
+        y0_0 = self.REN_0.y0_from_x0(x0_0.to(self.REN_0.x.device))
+        y0_1 = self.REN_1.y0_from_x0(x0_1.to(self.REN_1.x.device))
+        return y0_0 - y0_1
+    
+    def __call__(self, u0_seq: torch.Tensor, u1_seq: torch.Tensor) -> torch.Tensor:
+        """Alias per run(), per coerenza con le singole REN"""
+        return self.run(u0_seq, u1_seq)
+
+    def reset(self):
+        """Reset both REN internal states."""
+        self.REN_0.reset()
+        self.REN_1.reset()
+        self.x = torch.cat((self.REN_0.x.to(self.device), self.REN_1.x.to(self.device)), dim=-1)
+        self.y = torch.cat((self.REN_0.y_init.to(self.device), self.REN_1.y_init.to(self.device)), dim=-1)
+
 

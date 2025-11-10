@@ -299,7 +299,7 @@ class LoadData(Dataset):
             true_hypo_amount = np.array([])
         else:
             hypo_time = np.concatenate([hypoTreatment[i]['time'] for i in range(1, len(hypoTreatment))]).flatten()
-            true_hypo_amount = np.concatenate([hypoTreatment[i]['amount'] for i in range(1, len(hypoTreatment))]).flatten()
+            true_hypo_amount = np.concatenate([np.asarray(hypoTreatment[i]['amount']).astype(np.float64).ravel()for i in range(1, len(hypoTreatment))])
 
             # Convert to relative time
             timeCL = loaded['timeCL'][0, 0]
@@ -362,35 +362,35 @@ class LoadData(Dataset):
         scaler_insulin  = MinMaxScalerTorch() # For R and I_sat
         scaler_glucose      = MinMaxScalerTorch()
 
-        scaler_meal.compute_norm_indexes(torch.from_numpy(MH_real[:train_size]).double())
-        scaler_insulin.compute_norm_indexes(torch.from_numpy(I_sat_real[:train_size]).double())
-        scaler_glucose.compute_norm_indexes(torch.from_numpy(CGM_real[:train_size]).double())
+        scaler_meal.compute_norm_indexes(torch.from_numpy(MH_real[:train_size]).float())
+        scaler_insulin.compute_norm_indexes(torch.from_numpy(I_sat_real[:train_size]).float())
+        scaler_glucose.compute_norm_indexes(torch.from_numpy(CGM_real[:train_size]).float())
         
         
         #---------- store normalized data------------------
-        self.CGM = scaler_glucose.normalize(torch.from_numpy(CGM_real).double())
-        self.G = scaler_glucose.normalize(torch.from_numpy(G_real).double())
+        self.CGM = scaler_glucose.normalize(torch.from_numpy(CGM_real).float())
+        self.G = scaler_glucose.normalize(torch.from_numpy(G_real).float())
 
 
-        self.M = scaler_meal.normalize(torch.from_numpy(M_real).double())
+        self.M = scaler_meal.normalize(torch.from_numpy(M_real).float())
 
-        self.H = scaler_meal.normalize(torch.from_numpy(H_real).double())
-        self.H_rec = scaler_meal.normalize(torch.from_numpy(H_rec).double())
+        self.H = scaler_meal.normalize(torch.from_numpy(H_real).float())
+        self.H_rec = scaler_meal.normalize(torch.from_numpy(H_rec).float())
 
-        self.MH = scaler_meal.normalize(torch.from_numpy(MH_real).double())
-        self.MH_rec = scaler_meal.normalize(torch.from_numpy(MH_rec).double())
+        self.MH = scaler_meal.normalize(torch.from_numpy(MH_real).float())
+        self.MH_rec = scaler_meal.normalize(torch.from_numpy(MH_rec).float())
 
 
-        self.I_rec = scaler_insulin.normalize(torch.from_numpy(I_rec).double())
+        self.I_rec = scaler_insulin.normalize(torch.from_numpy(I_rec).float())
         if use_noise:
-            self.I_sat_rec = scaler_insulin.normalize(torch.from_numpy(I_sat_rec_p_noise).double())
+            self.I_sat_rec = scaler_insulin.normalize(torch.from_numpy(I_sat_rec_p_noise).float())
         else:
-            self.I_sat_rec = scaler_insulin.normalize(torch.from_numpy(I_sat_rec).double())
+            self.I_sat_rec = scaler_insulin.normalize(torch.from_numpy(I_sat_rec).float())
 
-        self.I_sat = scaler_insulin.normalize(torch.from_numpy(I_sat_real).double())
+        self.I_sat = scaler_insulin.normalize(torch.from_numpy(I_sat_real).float())
 
 
-        self.R = scaler_insulin.normalize(torch.from_numpy(I_sat_real - I_rec).double()) # I_rec is before saturation and noise
+        self.R = scaler_insulin.normalize(torch.from_numpy(I_sat_real - I_rec).float()) # I_rec is before saturation and noise
 
         self.time = torch.arange(0, len(CGM_real))
 
@@ -399,7 +399,7 @@ class LoadData(Dataset):
                 self.time = time
                 self.values = values
 
-        basal_vec = Data(torch.from_numpy(basal_time).double(), torch.from_numpy(basal_values).double())
+        basal_vec = Data(torch.from_numpy(basal_time).float(), torch.from_numpy(basal_values).float())
 
         self.basal_vec = basal_vec
         
@@ -421,7 +421,7 @@ class LoadData(Dataset):
         I_sat = self.I_sat[idx]
         CGM = self.CGM[idx]
         time = self.time[idx]
-        return MH.double(), I_rec.double(), R.double(),I_sat.double(), CGM.double(), time.double()
+        return MH.float(), I_rec.float(), R.float(),I_sat.float(), CGM.float(), time.float()
 
 
 
