@@ -21,6 +21,7 @@ class NonLinearController(nn.Module):
 
         self.register_buffer("glucose_PID", P.PID_par.ref*torch.ones(P.PID_par.integral_duration+1, dtype=torch.float32))
         self.register_buffer("saturation_error", torch.zeros(1, dtype=torch.float32))
+
         self.scaler_glucose = scaler_glucose
         self.scaler_insulin = scaler_insulin
         self.scaler_meal = scaler_meal
@@ -29,7 +30,7 @@ class NonLinearController(nn.Module):
         return torch.cat([vec[1:], new_value.unsqueeze(0)])
 
 
-    def forward(self, CGM_i, i):
+    def forward(self, CGM_i, i, saturation_error_init = None):
         """
         Compute the next state and output of the system.
 
@@ -40,11 +41,13 @@ class NonLinearController(nn.Module):
         Returns:
             torch.Tensor, torch.Tensor: Input of plant and next output at t+1. shape = (batch_size, 1, state_dim), shape = (batch_size, 1, output_dim)
         """
-
+ 
         #Compute next state and output
 
 
         ###############################################################
+        
+        i = i.item()
 
         ToD = i * 5 % 1440
         P = self.P
@@ -56,6 +59,9 @@ class NonLinearController(nn.Module):
 
         ########################################################
         self.glucose_PID = self.update(self.glucose_PID, CGM_i)
+        
+        if ToD == 0 and saturation_error_init is not None:
+            self.saturation_error[:] = saturation_error_init
 
         if i < 5:
             bolus = torch.tensor(0.0, dtype=torch.float32)
@@ -134,7 +140,7 @@ class NonLinearController(nn.Module):
 
 
 
-    def run(self, CGM):
+    def run(self, CGM, time, saturation_error_init = None):
         """
         Simulates the closed-loop system for a given initial condition.
 
@@ -146,15 +152,16 @@ class NonLinearController(nn.Module):
         Returns:
             torch.Tensor, torch.Tensor: Trajectories of outputs and inputs normalized
         """
+                
 
         u_pid_traj = []
         u_pid_rwgn_traj = []
         u_pid_rwgn_sat_traj = []
         r_traj = []
-        for t in range(len(CGM)):
+        for CGM_t, t in zip(CGM, time):
             # if t == 646:
             #     print("Debug point at time step 648")
-            u_pid, u_pid_rwgn, u_pid_rwgn_sat, r = self.forward(CGM[t], t)
+            u_pid, u_pid_rwgn, u_pid_rwgn_sat, r = self.forward(CGM_t, t, saturation_error_init)
             u_pid_traj.append(u_pid)
             u_pid_rwgn_traj.append(u_pid_rwgn)
             u_pid_rwgn_sat_traj.append(u_pid_rwgn_sat)
@@ -168,7 +175,7 @@ class NonLinearController(nn.Module):
 
         return u_pid_traj, u_pid_rwgn_traj, u_pid_rwgn_sat_traj, r_traj
 
-    def __call__(self, CGM):
+    def __call__(self, CGM, time, saturation_error_init = None):
         """
 
         Args:
@@ -178,7 +185,7 @@ class NonLinearController(nn.Module):
         Returns:
             torch.Tensor, torch.Tensor: Trajectories of outputs and inputs
         """
-        return self.run(CGM)
+        return self.run(CGM, time, saturation_error_init)
     
     
     
@@ -239,7 +246,7 @@ class ClosedLoopSystem(nn.Module):
         return y
 
 
-    def run(self, x0, u_ext):
+    def run(self, x0, u_ext, time):
         """
         Simulates the closed-loop system for a given initial condition.
 
@@ -269,17 +276,17 @@ class ClosedLoopSystem(nn.Module):
         dim_in_0 = self.system_model.REN_0.dim_in
         dim_in_1 = self.system_model.REN_1.dim_in
 
-        for t in range(horizon):
+        for i, t in enumerate(time[0,:,0]):
             y_traj.append(y)  # Store output
             _, _, control_u,_ = self.controller.forward(self.y_prev.squeeze(), t)  # Compute control input
             if self.negative:
                 control_u = -control_u
 
             # Prendo u0 dalla sequenza u_ext e sommo il controllo
-            u0_t = u_ext[:, t:t+1, :dim_in_0] + control_u
+            u0_t = u_ext[:, i:i+1, :dim_in_0] + control_u
 
             # Prendo u1 dalla sequenza u_ext
-            u1_t = u_ext[:, t:t+1, dim_in_0:dim_in_0+dim_in_1]
+            u1_t = u_ext[:, i:i+1, dim_in_0:dim_in_0+dim_in_1]
 
             # Forward DualREN passo per passo
             y = self.system_model.forward(u0_t, u1_t)
@@ -295,7 +302,7 @@ class ClosedLoopSystem(nn.Module):
 
         return u_traj, y_traj
 
-    def __call__(self, x0, u_ext):
+    def __call__(self, x0, u_ext, time):
         """
         Args:
             x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
@@ -305,4 +312,4 @@ class ClosedLoopSystem(nn.Module):
         Returns:
             torch.Tensor: Trajectories of outputs (batch_size, horizon, output_dim) [y0, ..., y_T-1]
         """
-        return self.run(x0, u_ext)
+        return self.run(x0, u_ext, time)

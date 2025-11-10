@@ -386,6 +386,11 @@ class LoadData(Dataset):
             self.I_sat_rec = scaler_insulin.normalize(torch.from_numpy(I_sat_rec_p_noise).float())
         else:
             self.I_sat_rec = scaler_insulin.normalize(torch.from_numpy(I_sat_rec).float())
+            
+        if use_noise:
+            self.sat_e = scaler_insulin.normalize(torch.from_numpy(saturation_error_2).float())
+        else:
+            self.sat_e = scaler_insulin.normalize(torch.from_numpy(saturation_error).float())
 
         self.I_sat = scaler_insulin.normalize(torch.from_numpy(I_sat_real).float())
 
