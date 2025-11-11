@@ -30,7 +30,7 @@ class NonLinearController(nn.Module):
         return torch.cat([vec[1:], new_value.unsqueeze(0)])
 
 
-    def forward(self, CGM_i, i):
+    def forward(self, CGM_i, i, saturation_error_init = None, glucose_PID_init = None):
         """
         Compute the next state and output of the system.
 
@@ -45,6 +45,14 @@ class NonLinearController(nn.Module):
   
         # update the previous informations
 
+        if i.item() == 60:
+            print("Debug point at time step 60")
+        
+        # if saturation_error_init is not None:
+        #     self.saturation_error[:] = saturation_error_init
+        #
+        # if glucose_PID_init is not None:
+        #     self.glucose_PID[:] = glucose_PID_init
 
 
         ###############################################################
@@ -153,12 +161,7 @@ class NonLinearController(nn.Module):
         Returns:
             torch.Tensor, torch.Tensor: Trajectories of outputs and inputs normalized
         """
-
-        if saturation_error_init is not None:
-            self.saturation_error[:] = saturation_error_init
-
-        if glucose_PID_init is not None:
-            self.glucose_PID[:] = glucose_PID_init
+                
 
         u_pid_traj = []
         u_pid_rwgn_traj = []
@@ -167,7 +170,7 @@ class NonLinearController(nn.Module):
         for CGM_t, t in zip(CGM, time):
             # if t == 646:
             #     print("Debug point at time step 648")
-            u_pid, u_pid_rwgn, u_pid_rwgn_sat, r = self.forward(CGM_t, t)
+            u_pid, u_pid_rwgn, u_pid_rwgn_sat, r = self.forward(CGM_t, t, saturation_error_init, glucose_PID_init)
             u_pid_traj.append(u_pid)
             u_pid_rwgn_traj.append(u_pid_rwgn)
             u_pid_rwgn_sat_traj.append(u_pid_rwgn_sat)
