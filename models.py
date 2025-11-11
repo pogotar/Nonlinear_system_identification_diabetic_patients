@@ -284,15 +284,15 @@ class ClosedLoopSystem(nn.Module):
 
         for i, t in enumerate(time[0,:,0]):
             y_traj.append(y)  # Store output
-            _, _, control_u,_ = self.controller.forward(self.y_prev.squeeze(), t)  # Compute control input
+            control_u, _, _,_ = self.controller.forward(self.y_prev.squeeze(), t)  # Compute control input
             if self.negative:
                 control_u = -control_u
 
             # Prendo u0 dalla sequenza u_ext e sommo il controllo
-            u0_t = u_ext[:, i:i+1, :dim_in_0] + control_u
+            u0_t = u_ext[:, i:i+1, :dim_in_0] 
 
             # Prendo u1 dalla sequenza u_ext
-            u1_t = u_ext[:, i:i+1, dim_in_0:dim_in_0+dim_in_1]
+            u1_t = u_ext[:, i:i+1, dim_in_0:dim_in_0+dim_in_1]+ control_u
 
             # Forward DualREN passo per passo
             y = self.system_model.forward(u0_t, u1_t)
