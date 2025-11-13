@@ -192,6 +192,412 @@ class NonLinearController(nn.Module):
             torch.Tensor, torch.Tensor: Trajectories of outputs and inputs
         """
         return self.run(CGM, time, saturation_error_init, glucose_PID_init)
+
+
+
+class NonLinearController_p(nn.Module):
+    torch.set_default_dtype(torch.float32)
+
+    """Simulates the closed-loop system (Plant + Controller)."""
+
+    def __init__(self, P, PF, basal_vec, scaler_glucose, scaler_insulin, scaler_meal, batch_size=1, use_noise=False):
+        super().__init__()
+        self.P = P
+        self.PF = PF
+        self.basal_vec = basal_vec
+        self.use_noise = use_noise
+        self.batch_size = batch_size  # MODIFICATO PER BATCH
+
+        # MODIFICATO PER BATCH: aggiunta dimensione batch
+        self.register_buffer(
+            "glucose_PID",
+            P.PID_par.ref * torch.ones((batch_size, P.PID_par.integral_duration + 1), dtype=torch.float32)  # MODIFICATO PER BATCH
+        )
+        self.register_buffer(
+            "saturation_error",
+            torch.zeros(batch_size, 1, dtype=torch.float32)  # MODIFICATO PER BATCH
+        )
+
+        self.scaler_glucose = scaler_glucose
+        self.scaler_insulin = scaler_insulin
+        self.scaler_meal = scaler_meal
+
+    # MODIFICATO PER BATCH: update supporta batch
+    def update(self, vec, new_value):
+        # vec: (batch_size, vec_len), new_value: (batch_size,)
+        return torch.cat([vec[:, 1:], new_value.unsqueeze(1)], dim=1)  # MODIFICATO PER BATCH
+
+    def forward(self, CGM_i, i):
+        """
+        Compute the next state and output of the system in parallel for batch.
+        CGM_i: (batch_size, ) or (batch_size, 1)
+        i: (batch_size, ) or scalar
+        """
+        
+
+        # MODIFICATO PER BATCH: gestisco batch dimension
+        batch_size = CGM_i.shape[0]
+        CGM_i = CGM_i.squeeze(1) if CGM_i.dim() == 2 else CGM_i  # MODIFICATO PER BATCH
+        CGM_i = self.scaler_glucose.denormalize(CGM_i)
+
+        self.glucose_PID = self.update(self.glucose_PID, CGM_i)  # MODIFICATO PER BATCH
+
+        P = self.P
+        PF = self.PF
+        basal_vec = self.basal_vec
+        use_noise = self.use_noise
+
+        # MODIFICATO PER BATCH: ToD calcolato batch-wise
+        if isinstance(i, torch.Tensor):
+            ToD = (i*5) % 1440  # MODIFICATO PER BATCH
+        else:
+            ToD = i*5 % 1440
+
+        # Inizializza bolus batch-wise
+        bolus = torch.zeros(batch_size, dtype=torch.float32)  # MODIFICATO PER BATCH
+
+        # PID calculation
+        # MODIFICATO PER BATCH: calcolo solo per i>=5
+        mask = i >= 5 if isinstance(i, torch.Tensor) else i >= 5
+        if mask.any() if isinstance(mask, torch.Tensor) else mask:
+            candidate_error = P.PID_par.ref - self.glucose_PID  # MODIFICATO PER BATCH
+            candidate_error_capped = torch.maximum(candidate_error, torch.tensor(P.PID_par.ref - 140, dtype=torch.float32))  # MODIFICATO PER BATCH
+            e_sum = torch.sum(candidate_error_capped, dim=1).unsqueeze(1)  # MODIFICATO PER BATCH
+
+            # Calcolo CR_now batch-wise (semplice broadcasting)
+            CR_index = ((ToD % 1) * 1440 / 5).long() # !!! (ToD % 1) percentuale su 1 ma ToD è intero, verificare che non ci siano stranezze # MODIFICATO PER BATCH
+            
+            
+            CR_now = P.Patient_par.CR_values_not_norm[0, CR_index] / torch.max(P.Patient_par.CR_values_not_norm)  # MODIFICATO PER BATCH
+
+            K_p = P.PID_par.K_p / CR_now  # MODIFICATO PER BATCH
+            K_d = P.PID_par.K_d / P.PID_par.tsController / CR_now  # MODIFICATO PER BATCH
+            K_i = P.PID_par.K_i * P.PID_par.tsController / CR_now  # MODIFICATO PER BATCH
+
+            e = P.PID_par.ref - self.glucose_PID[:, -1]  # MODIFICATO PER BATCH
+            e_m1 = P.PID_par.ref - self.glucose_PID[:, -2]  # MODIFICATO PER BATCH
+
+            delta_P = K_p * e.unsqueeze(1)  # MODIFICATO PER BATCH
+            delta_D = K_d * (e.unsqueeze(1) - e_m1.unsqueeze(1))  # MODIFICATO PER BATCH
+            delta_I = K_i* e_sum  # MODIFICATO PER BATCH
+
+            booster_d_neg = torch.ones(batch_size,1, dtype=torch.float32)  # MODIFICATO PER BATCH
+            booster_d_pos = torch.ones(batch_size,1, dtype=torch.float32)  # MODIFICATO PER BATCH
+
+            if self.glucose_PID.shape[1] > 3:
+                booster_d_neg, booster_d_pos = PF.function_booster_d_p(self.glucose_PID)  # MODIFICATO PER BATCH
+
+            basal_PID = delta_P + delta_D * booster_d_pos + delta_I  # MODIFICATO PER BATCH
+            CR_tuned = P.Patient_par.CR_tuned[P.patient - 1]  # MODIFICATO PER BATCH
+            bolus = basal_PID * P.PID_par.conversion_index * booster_d_neg * CR_tuned  # MODIFICATO PER BATCH
+            
+            if torch.isinf(bolus).any():
+                print("Errore: bolus contiene NaN")
+
+        # Basal e I batch-wise
+        basal = PF.calculate_basal_p(basal_vec.time, basal_vec.values, ToD)  # MODIFICATO PER BATCH
+        basal = torch.tensor(basal, dtype=torch.float32) # MODIFICATO PER BATCH
+        bolus = bolus.detach().clone().float() 
+        I = basal / 60 * P.PID_par.ts_measurement + bolus  # MODIFICATO PER BATCH
+
+        # Rumore batch-wise
+        rwgn_instantaneous = torch.zeros(batch_size, dtype=torch.float32)  # MODIFICATO PER BATCH
+        if use_noise:
+            mu = 0
+            sigma = torch.min(basal_vec.values) / 60 * P.PID_par.ts_measurement * 0.4
+            rwgn_instantaneous = PF.rwgn_at_time(ToD, 42, mu, sigma)  # MODIFICATO PER BATCH
+            
+
+
+        I_rwgn = I + rwgn_instantaneous  # MODIFICATO PER BATCH
+        
+        if torch.isnan(self.saturation_error).any() or torch.isnan(I_rwgn).any():
+            print("Errore: saturation_error o I_rwgn contengono NaN")
+        
+        if torch.isinf(I_rwgn).any():
+            print("Errore: I_rwgn contiene Inf")
+
+        # Saturation batch-wise
+        bolus_sat, basal_sat, self.saturation_error = PF.saturation_of_pump_and_trasformation_p(
+            I_rwgn, torch.zeros(batch_size,1), P.PID_par.ts_measurement, P.pumpParameter, self.saturation_error  # MODIFICATO PER BATCH
+        )
+        
+        if torch.isnan(self.saturation_error).any() or torch.isnan(I_rwgn).any():
+            print("Errore: saturation_error o I_rwgn contengono NaN")
+
+        I_sat = bolus_sat + basal_sat  # MODIFICATO PER BATCH
+        R = I_sat - I  # MODIFICATO PER BATCH
+        
+
+        # Normalizzazione batch-wise
+        return self.scaler_insulin.normalize(I), \
+               self.scaler_insulin.normalize(I_rwgn), \
+               self.scaler_insulin.normalize(I_sat), \
+               self.scaler_insulin.normalize(R)  # MODIFICATO PER BATCH
+
+
+    def __call__(self, CGM, time, saturation_error_init=None, glucose_PID_init=None):
+        return self.run(CGM, time, saturation_error_init, glucose_PID_init)
+
+
+
+
+    def run(self, CGM, time, saturation_error_init = None, glucose_PID_init = None):
+        """
+        Simulates the closed-loop system for a given initial condition.
+
+        Args:
+            x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
+            u_ext (torch.Tensor): External input signal. Shape = (batch_size, horizon, input_dim) normalized
+            output_noise_std: standard deviation of output noise
+
+        Returns:
+            torch.Tensor, torch.Tensor: Trajectories of outputs and inputs normalized
+        """
+
+        if saturation_error_init is not None:
+            self.saturation_error[:] = saturation_error_init
+
+        if glucose_PID_init is not None:
+            self.glucose_PID[:] = glucose_PID_init
+            
+        if torch.isnan(self.saturation_error).any():
+            print("Errore: saturation_error o I_rwgn contengono NaN")
+
+        u_pid_traj = []
+        u_pid_rwgn_traj = []
+        u_pid_rwgn_sat_traj = []
+        r_traj = []
+        for CGM_t, t in zip(CGM.T, time.T):
+            # if t == 646:
+            #     print("Debug point at time step 648")
+            CGM_t = CGM_t.unsqueeze(1)
+            t = t.unsqueeze(1)
+            u_pid, u_pid_rwgn, u_pid_rwgn_sat, r = self.forward(CGM_t, t)
+            u_pid_traj.append(u_pid)
+            u_pid_rwgn_traj.append(u_pid_rwgn)
+            u_pid_rwgn_sat_traj.append(u_pid_rwgn_sat)
+            r_traj.append(r)
+
+        u_pid_traj = torch.cat(u_pid_traj, dim=1).to(torch.float32)
+        u_pid_rwgn_traj = torch.cat(u_pid_rwgn_traj, dim=1).to(torch.float32)
+        u_pid_rwgn_sat_traj = torch.cat(u_pid_rwgn_sat_traj, dim=1).to(torch.float32)
+        r_traj = torch.cat(r_traj, dim=1).to(torch.float32)
+
+
+        return u_pid_traj, u_pid_rwgn_traj, u_pid_rwgn_sat_traj, r_traj
+
+    def __call__(self, CGM, time, saturation_error_init = None, glucose_PID_init = None):
+        """
+
+        Args:
+            x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
+            u_ext (torch.Tensor): External input signal. Shape = (batch_size, 1, input_dim)
+
+        Returns:
+            torch.Tensor, torch.Tensor: Trajectories of outputs and inputs
+        """
+        return self.run(CGM, time, saturation_error_init, glucose_PID_init)
+    
+    
+class NonLinearController_p2(nn.Module):
+    torch.set_default_dtype(torch.float32)
+
+    """Simulates the closed-loop system (Plant + Controller)."""
+
+    def __init__(self, P, PF, basal_vec, scaler_glucose, scaler_insulin, scaler_meal, batch_size=1, use_noise=False, saturation_error_init = None, glucose_PID_init = None):
+        super().__init__()
+        self.P = P
+        self.PF = PF
+        self.basal_vec = basal_vec
+        self.use_noise = use_noise
+        self.batch_size = batch_size  # MODIFICATO PER BATCH
+
+        # Se non fornisci inizializzazioni, usa i default
+        if saturation_error_init is None:
+            saturation_error_init = torch.zeros(batch_size, 1, dtype=torch.float32)
+        if glucose_PID_init is None:
+            glucose_PID_init = P.PID_par.ref * torch.ones(
+                (batch_size, P.PID_par.integral_duration + 1), dtype=torch.float32
+            )
+
+        # Registrazione buffer con i valori iniziali forniti
+        self.register_buffer("glucose_PID", glucose_PID_init.clone())
+        self.register_buffer("saturation_error", saturation_error_init.clone())
+
+        self.scaler_glucose = scaler_glucose
+        self.scaler_insulin = scaler_insulin
+        self.scaler_meal = scaler_meal
+
+    # MODIFICATO PER BATCH: update supporta batch
+    def update(self, vec, new_value):
+        # vec: (batch_size, vec_len), new_value: (batch_size,)
+        return torch.cat([vec[:, 1:], new_value.unsqueeze(1)], dim=1)  # MODIFICATO PER BATCH
+
+    def forward(self, CGM_i, i):
+        """
+        Compute the next state and output of the system in parallel for batch.
+        CGM_i: (batch_size, ) or (batch_size, 1)
+        i: (batch_size, ) or scalar
+        """
+        
+
+        # MODIFICATO PER BATCH: gestisco batch dimension
+        batch_size = CGM_i.shape[0]
+        CGM_i = CGM_i.squeeze(1) if CGM_i.dim() == 2 else CGM_i  # MODIFICATO PER BATCH
+        CGM_i = self.scaler_glucose.denormalize(CGM_i)
+
+        self.glucose_PID = self.update(self.glucose_PID, CGM_i)  # MODIFICATO PER BATCH
+
+        P = self.P
+        PF = self.PF
+        basal_vec = self.basal_vec
+        use_noise = self.use_noise
+
+        # MODIFICATO PER BATCH: ToD calcolato batch-wise
+        if isinstance(i, torch.Tensor):
+            ToD = (i*5) % 1440  # MODIFICATO PER BATCH
+        else:
+            ToD = i*5 % 1440
+
+        # Inizializza bolus batch-wise
+        bolus = torch.zeros(batch_size, dtype=torch.float32)  # MODIFICATO PER BATCH
+
+        # PID calculation
+        # MODIFICATO PER BATCH: calcolo solo per i>=5
+        mask = i >= 5 if isinstance(i, torch.Tensor) else i >= 5
+        if mask.any() if isinstance(mask, torch.Tensor) else mask:
+            candidate_error = P.PID_par.ref - self.glucose_PID  # MODIFICATO PER BATCH
+            candidate_error_capped = torch.maximum(candidate_error, torch.tensor(P.PID_par.ref - 140, dtype=torch.float32))  # MODIFICATO PER BATCH
+            e_sum = torch.sum(candidate_error_capped, dim=1).unsqueeze(1)  # MODIFICATO PER BATCH
+
+            # Calcolo CR_now batch-wise (semplice broadcasting)
+            CR_index = ((ToD % 1) * 1440 / 5).long() # !!! (ToD % 1) percentuale su 1 ma ToD è intero, verificare che non ci siano stranezze # MODIFICATO PER BATCH
+            
+            
+            CR_now = P.Patient_par.CR_values_not_norm[0, CR_index] / torch.max(P.Patient_par.CR_values_not_norm)  # MODIFICATO PER BATCH
+
+            K_p = P.PID_par.K_p / CR_now  # MODIFICATO PER BATCH
+            K_d = P.PID_par.K_d / P.PID_par.tsController / CR_now  # MODIFICATO PER BATCH
+            K_i = P.PID_par.K_i * P.PID_par.tsController / CR_now  # MODIFICATO PER BATCH
+
+            e = P.PID_par.ref - self.glucose_PID[:, -1]  # MODIFICATO PER BATCH
+            e_m1 = P.PID_par.ref - self.glucose_PID[:, -2]  # MODIFICATO PER BATCH
+
+            delta_P = K_p * e.unsqueeze(1)  # MODIFICATO PER BATCH
+            delta_D = K_d * (e.unsqueeze(1) - e_m1.unsqueeze(1))  # MODIFICATO PER BATCH
+            delta_I = K_i* e_sum  # MODIFICATO PER BATCH
+
+            booster_d_neg = torch.ones(batch_size,1, dtype=torch.float32)  # MODIFICATO PER BATCH
+            booster_d_pos = torch.ones(batch_size,1, dtype=torch.float32)  # MODIFICATO PER BATCH
+
+            if self.glucose_PID.shape[1] > 3:
+                booster_d_neg, booster_d_pos = PF.function_booster_d_p(self.glucose_PID)  # MODIFICATO PER BATCH
+
+            basal_PID = delta_P + delta_D * booster_d_pos + delta_I  # MODIFICATO PER BATCH
+            CR_tuned = P.Patient_par.CR_tuned[P.patient - 1]  # MODIFICATO PER BATCH
+            bolus = basal_PID * P.PID_par.conversion_index * booster_d_neg * CR_tuned  # MODIFICATO PER BATCH
+            
+            if torch.isinf(bolus).any():
+                print("Errore: bolus contiene NaN")
+
+        # Basal e I batch-wise
+        basal = PF.calculate_basal_p(basal_vec.time, basal_vec.values, ToD)  # MODIFICATO PER BATCH
+        basal = torch.tensor(basal, dtype=torch.float32) # MODIFICATO PER BATCH
+        bolus = bolus.detach().clone().float() 
+        I = basal / 60 * P.PID_par.ts_measurement + bolus  # MODIFICATO PER BATCH
+
+        # Rumore batch-wise
+        rwgn_instantaneous = torch.zeros(batch_size, dtype=torch.float32)  # MODIFICATO PER BATCH
+        if use_noise:
+            mu = 0
+            sigma = torch.min(basal_vec.values) / 60 * P.PID_par.ts_measurement * 0.4
+            rwgn_instantaneous = PF.rwgn_at_time(ToD, 42, mu, sigma)  # MODIFICATO PER BATCH
+            
+
+
+        I_rwgn = I + rwgn_instantaneous  # MODIFICATO PER BATCH
+        
+        if torch.isnan(self.saturation_error).any() or torch.isnan(I_rwgn).any():
+            print("Errore: saturation_error o I_rwgn contengono NaN")
+        
+        if torch.isinf(I_rwgn).any():
+            print("Errore: I_rwgn contiene Inf")
+
+        # Saturation batch-wise
+        bolus_sat, basal_sat, self.saturation_error = PF.saturation_of_pump_and_trasformation_p(
+            I_rwgn, torch.zeros(batch_size,1), P.PID_par.ts_measurement, P.pumpParameter, self.saturation_error  # MODIFICATO PER BATCH
+        )
+        
+        if torch.isnan(self.saturation_error).any() or torch.isnan(I_rwgn).any():
+            print("Errore: saturation_error o I_rwgn contengono NaN")
+
+        I_sat = bolus_sat + basal_sat  # MODIFICATO PER BATCH
+        R = I_sat - I  # MODIFICATO PER BATCH
+        
+
+        # Normalizzazione batch-wise
+        return self.scaler_insulin.normalize(I), \
+               self.scaler_insulin.normalize(I_rwgn), \
+               self.scaler_insulin.normalize(I_sat), \
+               self.scaler_insulin.normalize(R)  # MODIFICATO PER BATCH
+
+
+    def __call__(self, CGM, time, saturation_error_init=None, glucose_PID_init=None):
+        return self.run(CGM, time, saturation_error_init, glucose_PID_init)
+
+
+
+
+    def run(self, CGM, time):
+        """
+        Simulates the closed-loop system for a given initial condition.
+
+        Args:
+            x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
+            u_ext (torch.Tensor): External input signal. Shape = (batch_size, horizon, input_dim) normalized
+            output_noise_std: standard deviation of output noise
+
+        Returns:
+            torch.Tensor, torch.Tensor: Trajectories of outputs and inputs normalized
+        """
+
+
+        u_pid_traj = []
+        u_pid_rwgn_traj = []
+        u_pid_rwgn_sat_traj = []
+        r_traj = []
+        for CGM_t, t in zip(CGM.T, time.T):
+            # if t == 646:
+            #     print("Debug point at time step 648")
+            CGM_t = CGM_t.unsqueeze(1)
+            t = t.unsqueeze(1)
+            u_pid, u_pid_rwgn, u_pid_rwgn_sat, r = self.forward(CGM_t, t)
+            u_pid_traj.append(u_pid)
+            u_pid_rwgn_traj.append(u_pid_rwgn)
+            u_pid_rwgn_sat_traj.append(u_pid_rwgn_sat)
+            r_traj.append(r)
+
+        u_pid_traj = torch.cat(u_pid_traj, dim=1).to(torch.float32)
+        u_pid_rwgn_traj = torch.cat(u_pid_rwgn_traj, dim=1).to(torch.float32)
+        u_pid_rwgn_sat_traj = torch.cat(u_pid_rwgn_sat_traj, dim=1).to(torch.float32)
+        r_traj = torch.cat(r_traj, dim=1).to(torch.float32)
+
+
+        return u_pid_traj, u_pid_rwgn_traj, u_pid_rwgn_sat_traj, r_traj
+
+    def __call__(self, CGM, time):
+        """
+
+        Args:
+            x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
+            u_ext (torch.Tensor): External input signal. Shape = (batch_size, 1, input_dim)
+
+        Returns:
+            torch.Tensor, torch.Tensor: Trajectories of outputs and inputs
+        """
+        return self.run(CGM, time)
+    
     
     
     

@@ -100,6 +100,74 @@ class PID_functions:
         saturation_error = saturation_error.to(torch.float32)
 
         return bolus, basal, saturation_error
+    
+    @staticmethod
+    def saturation_of_pump_and_trasformation_p(bolus, basal, ts_measurement,
+                                             pumpParameter, saturation_error):
+        """
+        Saturation of pump and transformation function
+
+        Parameters:
+        -----------
+        bolus : float
+            Bolus insulin amount
+        basal : float
+            Basal insulin rate
+        ts_measurement : float
+            Measurement time step
+        pumpParameter : object
+            Pump parameters (quantum, saturationMax)
+        saturation_error : float
+            Previous saturation error
+
+        Returns:
+        --------
+        bolus : float
+            Saturated bolus
+        basal : float
+            Saturated basal (always 0)
+        saturation_error : float
+            Updated saturation error
+        """
+        
+        torch.set_default_dtype(torch.float32) 
+        
+                
+        if torch.isnan(bolus).any() or torch.isnan(saturation_error).any():
+            print("Errore: rwgn_instantaneous contiene NaN")
+            
+        if torch.isinf(bolus).any() or torch.isinf(saturation_error).any():
+            print("Errore: rwgn_instantaneous contiene Inf")
+            
+        # Total amount
+        amount = bolus + basal / 60 * ts_measurement  # UI
+
+        # Pump params
+        pumpSaturation = pumpParameter.saturationMax  # UI
+        quanto = pumpParameter.quantum  # UI
+        
+        if torch.isnan(bolus).any() or torch.isnan(saturation_error).any():
+            print("Errore: rwgn_instantaneous contiene NaN")
+
+        # Rounding to closest quanto taking previous error into account
+        bolus = quanto * torch.round((amount + saturation_error) / quanto)  # UI
+
+        # Store remaining bolus if bolus > saturationMax
+        
+        # Saturation check
+        bolus = torch.minimum(bolus, pumpSaturation)
+
+        saturation_error = amount + saturation_error - bolus  # UI
+
+        
+        bolus = bolus.to(torch.float32)
+        # basal = basal.detach().clone().float() 
+        saturation_error = saturation_error.to(torch.float32)
+        
+        if torch.isnan(bolus).any() or torch.isnan(saturation_error).any():
+            print("Errore: rwgn_instantaneous contiene NaN")
+
+        return bolus, basal, saturation_error
 
     @staticmethod
     def function_booster_d(glucose_PID):
@@ -134,16 +202,56 @@ class PID_functions:
             booster_d_pos = 4
 
         return booster_d_neg, booster_d_pos
+    
+    @staticmethod
+    def function_booster_d_p(glucose_PID_batch):
+        """
+        glucose_PID_batch: torch.Tensor shape (batch, 25)
+        return: booster_d_neg, booster_d_pos shape (batch, 1)
+        """
+
+        if glucose_PID_batch.shape[1] < 4:
+            raise ValueError("Ogni batch deve avere almeno 4 valori")
+
+        # Calcolo differenze sugli ultimi 4 valori
+        d1 = glucose_PID_batch[:, -1] - glucose_PID_batch[:, -2]
+        d2 = glucose_PID_batch[:, -1] - glucose_PID_batch[:, -3]
+        d3 = glucose_PID_batch[:, -1] - glucose_PID_batch[:, -4]
+
+        # ---- booster_d_neg ----
+        booster_d_neg = torch.ones_like(d1)
+        mask_neg = (d1 < 0) & (d2 < 0) & (d3 < 0)
+        booster_d_neg[mask_neg] = 0
+
+        # ---- booster_d_pos ----
+        booster_d_pos = torch.ones_like(d1)
+        mask_pos = (d1 > 0) & (d2 > 0) & (d3 > 0)
+        booster_d_pos[mask_pos] = 1.1
+
+        # Aggiornamento valori più alti
+        booster_d_pos = torch.where((d1 > 10) & (d2 > 20), torch.tensor(2.5, device=glucose_PID_batch.device), booster_d_pos)
+        booster_d_pos = torch.where((d1 > 15) & (d2 > 30), torch.tensor(3.0, device=glucose_PID_batch.device), booster_d_pos)
+        booster_d_pos = torch.where((d1 > 20) & (d2 > 40), torch.tensor(4.0, device=glucose_PID_batch.device), booster_d_pos)
+
+        # Aggiungi dimensione finale per shape (batch,1)
+        return booster_d_neg.unsqueeze(1), booster_d_pos.unsqueeze(1)
 
     @staticmethod
     def rwgn_at_time(t_index, seed, mu, sigma):
         def fract(x): return x - np.floor(x)
+        
+        if isinstance(t_index, torch.Tensor):
+            t_index = t_index.detach().cpu().numpy().astype(np.float64)
 
         u1 = fract(np.sin(12.9898 * (seed + t_index)) * 43758.5453)
         u2 = fract(np.sin(78.233 * (seed + t_index)) * 43758.5453)
 
         z = np.sqrt(-2 * np.log(u1)) * np.cos(2 * np.pi * u2)
         r = mu + sigma * z
+        
+        r_np = r.numpy()
+        if np.isinf(r_np).any() or np.isnan(r_np).any():
+            print("Errore: rwgn_at_time contiene Inf o NaN")
         return r
 
     @staticmethod
@@ -158,6 +266,33 @@ class PID_functions:
             currentBasal = basal_values[-1]
 
         return currentBasal
+    
+    @staticmethod
+    def calculate_basal_p(basal_time, basal_values, ToD):
+        """
+        basal_time: tensor (num_basal,)  -> valori dei tempi basal
+        basal_values: tensor (num_basal,) -> valori basal
+        ToD: tensor (batch, 1)           -> time of day per batch
+        return: tensor (batch, 1)        -> current basal per batch
+        """
+
+        batch = ToD.shape[0]
+        num_basal = basal_time.shape[0]
+
+        # espandiamo per broadcasting: (batch, num_basal)
+        ToD_exp = ToD.repeat(1, num_basal)       # (batch, num_basal)
+        basal_time_exp = basal_time.unsqueeze(0).repeat(batch, 1)  # (batch, num_basal)
+
+        # creiamo maschera: True se basal_time <= ToD
+        mask = basal_time_exp <= ToD_exp         # (batch, num_basal)
+
+        # indici dell'ultimo True per ogni batch
+        mask_flipped = torch.flip(mask, dims=[1])
+        last_idx = num_basal - 1 - mask_flipped.float().argmax(dim=1)  # (batch,)
+
+        # otteniamo i valori
+        currentBasal = basal_values[last_idx]      # (batch,)
+        return currentBasal.unsqueeze(1)           # (batch,1)
 
 
 class MinMaxScalerTorch:
