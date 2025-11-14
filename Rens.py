@@ -5,193 +5,196 @@ from collections import OrderedDict
 import numpy as np  # linear algebra
 
 
-class ContractiveREN(nn.Module):
-    """
-    Acyclic contractive recurrent equilibrium network, following the paper:
-    "Recurrent equilibrium networks: Flexible dynamic models with guaranteed
-    stability and robustness, Revay M et al. ."
+# class ContractiveREN(nn.Module):
+#     """
+#     Acyclic contractive recurrent equilibrium network, following the paper:
+#     "Recurrent equilibrium networks: Flexible dynamic models with guaranteed
+#     stability and robustness, Revay M et al. ."
 
-    The mathematical model of RENs relies on an implicit layer embedded in a recurrent layer.
-    The model is described as,
+#     The mathematical model of RENs relies on an implicit layer embedded in a recurrent layer.
+#     The model is described as,
 
-                    [  E . x_t+1 ]  =  [ F    B_1  B_2   ]   [  x_t ]   +   [  b_x ]
-                    [  Λ . v_t   ]  =  [ C_1  D_11  D_12 ]   [  w_t ]   +   [  b_w ]
-                    [  y_t       ]  =  [ C_2  D_21  D_22 ]   [  u_t ]   +   [  b_u ]
+#                     [  E . x_t+1 ]  =  [ F    B_1  B_2   ]   [  x_t ]   +   [  b_x ]
+#                     [  Λ . v_t   ]  =  [ C_1  D_11  D_12 ]   [  w_t ]   +   [  b_w ]
+#                     [  y_t       ]  =  [ C_2  D_21  D_22 ]   [  u_t ]   +   [  b_u ]
 
-    where E is an invertible matrix and Λ is a positive-definite diagonal matrix. The model parameters
-    are then {E, Λ , F, B_i, C_i, D_ij, b} which form a convex set according to the paper.
+#     where E is an invertible matrix and Λ is a positive-definite diagonal matrix. The model parameters
+#     are then {E, Λ , F, B_i, C_i, D_ij, b} which form a convex set according to the paper.
 
-    NOTE: REN has input "u", output "y", and internal state "x". When used in closed-loop,
-          the REN input "u" would be the noise reconstruction ("w") and the REN output ("y")
-          would be the input to the plant. The internal state of the REN ("x") should not be mistaken
-          with the internal state of the plant.
-    """
+#     NOTE: REN has input "u", output "y", and internal state "x". When used in closed-loop,
+#           the REN input "u" would be the noise reconstruction ("w") and the REN output ("y")
+#           would be the input to the plant. The internal state of the REN ("x") should not be mistaken
+#           with the internal state of the plant.
+#     """
 
-    def __init__(
-        self, dim_in: int, dim_out: int, dim_internal: int,
-        dim_nl: int, internal_state_init = None, y_init = None,
-        initialization_std: float = 0.5, pos_def_tol: float = 0.001, contraction_rate_lb: float = 1.0
-    ):
-        """
-        Args:
-            dim_in (int): Input (u) dimension.
-            dim_out (int): Output (y) dimension.
-            dim_internal (int): Internal state (x) dimension. This state evolves with contraction properties.
-            dim_nl (int): Dimension of the input ("v") and ouput ("w") of the nonlinear static block.
-            initialization_std (float, optional): Weight initialization. Set to 0.1 by default.
-            internal_state_init (torch.Tensor or None, optional): Initial condition for the internal state. Defaults to 0 when set to None.
-            epsilon (float, optional): Positive and negligible scalar to force positive definite matrices.
-            contraction_rate_lb (float, optional): Lower bound on the contraction rate. Defaults to 1.
-        """
-        super().__init__()
+#     def __init__(
+#         self, dim_in: int, dim_out: int, dim_internal: int,
+#         dim_nl: int, internal_state_init = None, y_init = None,
+#         initialization_std: float = 0.5, pos_def_tol: float = 0.001, contraction_rate_lb: float = 1.0
+#     ):
+#         """
+#         Args:
+#             dim_in (int): Input (u) dimension.
+#             dim_out (int): Output (y) dimension.
+#             dim_internal (int): Internal state (x) dimension. This state evolves with contraction properties.
+#             dim_nl (int): Dimension of the input ("v") and ouput ("w") of the nonlinear static block.
+#             initialization_std (float, optional): Weight initialization. Set to 0.1 by default.
+#             internal_state_init (torch.Tensor or None, optional): Initial condition for the internal state. Defaults to 0 when set to None.
+#             epsilon (float, optional): Positive and negligible scalar to force positive definite matrices.
+#             contraction_rate_lb (float, optional): Lower bound on the contraction rate. Defaults to 1.
+#         """
+#         super().__init__()
 
-        # set dimensions
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-        self.dim_internal = dim_internal
-        self.dim_nl = dim_nl
+#         # set dimensions
+#         self.dim_in = dim_in
+#         self.dim_out = dim_out
+#         self.dim_internal = dim_internal
+#         self.dim_nl = dim_nl
 
-        # set functionalities
-        self.contraction_rate_lb = contraction_rate_lb
+#         # set functionalities
+#         self.contraction_rate_lb = contraction_rate_lb
 
-        # auxiliary elements
-        self.epsilon = pos_def_tol
+#         # auxiliary elements
+#         self.epsilon = pos_def_tol
 
-        # # # free parameters
-        # define matrices shapes
-        # auxiliary matrices
-        self.X_shape = (2 * self.dim_internal + self.dim_nl, 2 * self.dim_internal + self.dim_nl)
-        self.Y_shape = (self.dim_internal, self.dim_internal)
-        # nn state dynamics
-        self.B2_shape = (self.dim_internal, self.dim_in)
-        # nn output
-        self.C2_shape = (self.dim_out, self.dim_internal)
-        self.D21_shape = (self.dim_out, self.dim_nl)
-        self.D22_shape = (self.dim_out, self.dim_in)
-        # v signal
-        self.D12_shape = (self.dim_nl, self.dim_in)
+#         # # # free parameters
+#         # define matrices shapes
+#         # auxiliary matrices
+#         self.X_shape = (2 * self.dim_internal + self.dim_nl, 2 * self.dim_internal + self.dim_nl)
+#         self.Y_shape = (self.dim_internal, self.dim_internal)
+#         # nn state dynamics
+#         self.B2_shape = (self.dim_internal, self.dim_in)
+#         # nn output
+#         self.C2_shape = (self.dim_out, self.dim_internal)
+#         self.D21_shape = (self.dim_out, self.dim_nl)
+#         self.D22_shape = (self.dim_out, self.dim_in)
+#         # v signal
+#         self.D12_shape = (self.dim_nl, self.dim_in)
 
-        # define trainable params
-        self.training_param_names = ['X', 'Y', 'B2', 'C2', 'D21', 'D22', 'D12']
-        self._init_trainable_params(initialization_std)
+#         # define trainable params
+#         self.training_param_names = ['X', 'Y', 'B2', 'C2', 'D21', 'D22', 'D12']
+#         self._init_trainable_params(initialization_std)
 
-        # mask
-        self.register_buffer('eye_mask_H', torch.eye(2 * self.dim_internal + self.dim_nl))
-        self.register_buffer('eye_mask_w', torch.eye(self.dim_nl))
+#         # mask
+#         self.register_buffer('eye_mask_H', torch.eye(2 * self.dim_internal + self.dim_nl))
+#         self.register_buffer('eye_mask_w', torch.eye(self.dim_nl))
 
-        # initialize internal state
-        if internal_state_init is None:
-            if y_init is None:
-                self.x = torch.zeros(1, 1, self.dim_internal)
-            else:
-                y_init = y_init.reshape(1, -1)
-                self.x = torch.linalg.lstsq(self.C2, y_init.to(self.C2.device).squeeze(1).T)[0].T
-        else:
-            assert isinstance(internal_state_init, torch.Tensor)
-            self.x = internal_state_init.reshape(1, 1, self.dim_internal)
-        self.register_buffer('x_init', self.x.detach().clone())
-        self.register_buffer('y_init', F.linear(self.x_init, self.C2))
+#         # initialize internal state
+#         if internal_state_init is None:
+#             if y_init is None:
+#                 self.x = torch.zeros(1, 1, self.dim_internal)
+#             else:
+#                 y_init = y_init.reshape(1, -1)
+#                 self.x = torch.linalg.lstsq(self.C2, y_init.to(self.C2.device).squeeze(1).T)[0].T
+#         else:
+#             assert isinstance(internal_state_init, torch.Tensor)
+#             self.x = internal_state_init.reshape(1, 1, self.dim_internal)
+#         self.register_buffer('x_init', self.x.detach().clone())
+#         self.register_buffer('y_init', F.linear(self.x_init, self.C2))
 
-    def _update_model_param(self):
-        """
-        Update non-trainable matrices according to the REN formulation to preserve contraction.
-        """
-        # dependent params
-        H = torch.matmul(self.X.T, self.X) + self.epsilon * self.eye_mask_H
-        h1, h2, h3 = torch.split(H, [self.dim_internal, self.dim_nl, self.dim_internal], dim=0)
-        H11, H12, H13 = torch.split(h1, [self.dim_internal, self.dim_nl, self.dim_internal], dim=1)
-        H21, H22, _ = torch.split(h2, [self.dim_internal, self.dim_nl, self.dim_internal], dim=1)
-        H31, H32, H33 = torch.split(h3, [self.dim_internal, self.dim_nl, self.dim_internal], dim=1)
-        P = H33
+#     def _update_model_param(self):
+#         """
+#         Update non-trainable matrices according to the REN formulation to preserve contraction.
+#         """
+#         # dependent params
+#         H = torch.matmul(self.X.T, self.X) + self.epsilon * self.eye_mask_H
+#         h1, h2, h3 = torch.split(H, [self.dim_internal, self.dim_nl, self.dim_internal], dim=0)
+#         H11, H12, H13 = torch.split(h1, [self.dim_internal, self.dim_nl, self.dim_internal], dim=1)
+#         H21, H22, _ = torch.split(h2, [self.dim_internal, self.dim_nl, self.dim_internal], dim=1)
+#         H31, H32, H33 = torch.split(h3, [self.dim_internal, self.dim_nl, self.dim_internal], dim=1)
+#         P = H33
 
-        # nn state dynamics
-        self.F = H31
-        self.B1 = H32
+#         # nn state dynamics
+#         self.F = H31
+#         self.B1 = H32
 
-        # nn output
-        self.E = 0.5 * (H11 + self.contraction_rate_lb * P + self.Y - self.Y.T)
-        self.E_inv = self.E.inverse()
+#         # nn output
+#         self.E = 0.5 * (H11 + self.contraction_rate_lb * P + self.Y - self.Y.T)
+#         self.E_inv = self.E.inverse()
 
-        # v signal for strictly acyclic REN
-        self.Lambda = 0.5 * torch.diag(H22)
-        self.D11 = -torch.tril(H22, diagonal=-1)
-        self.C1 = -H21
+#         # v signal for strictly acyclic REN
+#         self.Lambda = 0.5 * torch.diag(H22)
+#         self.D11 = -torch.tril(H22, diagonal=-1)
+#         self.C1 = -H21
 
-    def forward(self, u_in):
-        """
-        Forward pass of REN.
+#     def forward(self, u_in):
+#         """
+#         Forward pass of REN.
 
-        Args:
-            u_in (torch.Tensor): Input with the size of (batch_size, 1, self.dim_in).
+#         Args:
+#             u_in (torch.Tensor): Input with the size of (batch_size, 1, self.dim_in).
 
-        Return:
-            y_out (torch.Tensor): Output with (batch_size, 1, self.dim_out).
-        """
-        # update non-trainable model params
-        self._update_model_param()
+#         Return:
+#             y_out (torch.Tensor): Output with (batch_size, 1, self.dim_out).
+#         """
+#         # update non-trainable model params
+#         self._update_model_param()
 
-        batch_size = u_in.shape[0]
+#         batch_size = u_in.shape[0]
 
-        w = torch.zeros(batch_size, 1, self.dim_nl, device=u_in.device)
+#         w = torch.zeros(batch_size, 1, self.dim_nl, device=u_in.device)
 
-        # update each row of w using Eq. (8) with a lower triangular D11
-        for i in range(self.dim_nl):
-            #  v is element i of v with dim (batch_size, 1)
-            v = F.linear(self.x, self.C1[i, :]) + F.linear(w, self.D11[i, :]) + F.linear(u_in, self.D12[i,:])
-            w = w + (self.eye_mask_w[i, :] * torch.tanh(v / self.Lambda[i])).reshape(batch_size, 1, self.dim_nl)
-
-        # compute next state using Eq. 18
-        self.x = F.linear(F.linear(self.x, self.F) + F.linear(w, self.B1) + F.linear(u_in, self.B2), self.E_inv)
-
-        # compute output
-        y_out = F.linear(self.x, self.C2) + F.linear(w, self.D21) + F.linear(u_in, self.D22)
-        return y_out
-
-    def reset(self):
-        self.x = self.x_init  # reset the REN state to the initial value
+#         # update each row of w using Eq. (8) with a lower triangular D11
+#         for i in range(self.dim_nl):
+#             #  v is element i of v with dim (batch_size, 1)
+#             v = F.linear(self.x, self.C1[i, :]) + F.linear(w, self.D11[i, :]) + F.linear(u_in, self.D12[i,:])
+#             tanh_term = torch.tanh(v / self.Lambda[i])
+#             tanh_term = tanh_term.view(batch_size, 1, 1)  # o (batch_size, 1, dim_nl)
+#             w = w + self.eye_mask_w[i:i+1, :] * tanh_term
 
 
-    def run(self, u_in):
-        """
-        Runs the forward pass of REN for a whole input sequence of length horizon.
+#         # compute next state using Eq. 18
+#         self.x = F.linear(F.linear(self.x, self.F) + F.linear(w, self.B1) + F.linear(u_in, self.B2), self.E_inv)
 
-        Args:
-            u_in (torch.Tensor): Input with the size of (batch_size, horizon, self.dim_in).
+#         # compute output
+#         y_out = F.linear(self.x, self.C2) + F.linear(w, self.D21) + F.linear(u_in, self.D22)
+#         return y_out
 
-        Return:
-            y_out (torch.Tensor): Output with (batch_size, horizon, self.dim_out).
-        """
+#     def reset(self):
+#         self.x = self.x_init  # reset the REN state to the initial value
 
-        self.reset()
-        y_log = self.y_init.detach().clone().repeat(u_in.shape[0], 1, 1)
-        for t in range(u_in.shape[1] - 1):
-            y_log = torch.cat((y_log, self.forward(u_in[:, t:t + 1, :])), 1)
-        # note that the last input is not used
-        return y_log
 
-    # init trainable params
-    def _init_trainable_params(self, initialization_std):
-        for training_param_name in self.training_param_names:  # name of one of the training params, e.g., X
-            # read the defined shapes of the selected training param, e.g., X_shape
-            shape = getattr(self, training_param_name + '_shape')
-            # define the selected param (e.g., self.X) as nn.Parameter
-            setattr(self, training_param_name, nn.Parameter((torch.randn(*shape) * initialization_std)))
+#     def run(self, u_in):
+#         """
+#         Runs the forward pass of REN for a whole input sequence of length horizon.
 
-    # setters and getters
-    def get_parameter_shapes(self):
-        param_dict = OrderedDict(
-            (name, getattr(self, name).shape) for name in self.training_param_names
-        )
-        return param_dict
+#         Args:
+#             u_in (torch.Tensor): Input with the size of (batch_size, horizon, self.dim_in).
 
-    def get_named_parameters(self):
-        param_dict = OrderedDict(
-            (name, getattr(self, name)) for name in self.training_param_names
-        )
-        return param_dict
+#         Return:
+#             y_out (torch.Tensor): Output with (batch_size, horizon, self.dim_out).
+#         """
 
-    def __call__(self, u_in):
-        return self.run(u_in)
+#         self.reset()
+#         y_log = self.y_init.detach().clone().repeat(u_in.shape[0], 1, 1)
+#         for t in range(u_in.shape[1] - 1):
+#             y_log = torch.cat((y_log, self.forward(u_in[:, t:t + 1, :])), 1)
+#         # note that the last input is not used
+#         return y_log
+
+#     # init trainable params
+#     def _init_trainable_params(self, initialization_std):
+#         for training_param_name in self.training_param_names:  # name of one of the training params, e.g., X
+#             # read the defined shapes of the selected training param, e.g., X_shape
+#             shape = getattr(self, training_param_name + '_shape')
+#             # define the selected param (e.g., self.X) as nn.Parameter
+#             setattr(self, training_param_name, nn.Parameter((torch.randn(*shape) * initialization_std)))
+
+#     # setters and getters
+#     def get_parameter_shapes(self):
+#         param_dict = OrderedDict(
+#             (name, getattr(self, name).shape) for name in self.training_param_names
+#         )
+#         return param_dict
+
+#     def get_named_parameters(self):
+#         param_dict = OrderedDict(
+#             (name, getattr(self, name)) for name in self.training_param_names
+#         )
+#         return param_dict
+
+#     def __call__(self, u_in):
+#         return self.run(u_in)
 
 
 # REN WITH GIVEN GAMMA
@@ -302,22 +305,28 @@ class REN_IQC_gamma(nn.Module):
         self.register_buffer('zeros_mask_R', torch.zeros(dim_in, dim_in, device=device))
         self.register_buffer('zeros_mask_so', torch.zeros(dim_internal, dim_out, device=device))
         self.register_buffer('eye_mask_w', torch.eye(dim_nl, device=device))
+        
+        batch_size = 1  # default batch size
 
         # initialize internal state
         if internal_state_init is not None:
             assert isinstance(internal_state_init, torch.Tensor)
             self.x = internal_state_init.reshape(1, 1, dim_internal)
         elif y_init is not None:
-            y_init = y_init.reshape(1, -1)
+            batch_size = y_init.shape[0]
             self.C2 = nn.Parameter(self.C2.data)  # C2 already inizializzato come Parameter
-            self.x = torch.linalg.lstsq(self.C2, y_init.squeeze(1).T)[0].T.unsqueeze(0).unsqueeze(0)
+            self.x = torch.stack([
+                torch.linalg.lstsq(self.C2, y_init[b, 0, :].unsqueeze(1))[0].T
+                for b in range(batch_size)
+            ], dim=0).unsqueeze(1)
+            # self.x = torch.linalg.lstsq(self.C2, y_init.squeeze(1).T)[0].T.unsqueeze(0).unsqueeze(0)
         else:
             self.x = torch.zeros(1, 1, dim_internal)
 
         # register initial state buffers
         self.register_buffer('x_init', self.x.detach().clone())
         y_init_calc = F.linear(self.x_init, self.C2)
-        y_init_calc = y_init_calc.view(1, 1, self.dim_out)
+        y_init_calc = y_init_calc.view(batch_size, 1, self.dim_out)
         self.register_buffer('y_init', y_init_calc)
 
         # move everything to device
@@ -422,21 +431,28 @@ class REN_IQC_gamma(nn.Module):
         y_out = F.linear(self.x, self.C2) + F.linear(w, self.D21) # + F.linear(u_in, self.D22)
         return y_out
 
-    def reset(self, x0=None, batch_size=None):
+    def reset(self, x0=None, y0= None):
         """
         Reset compatibile con ClosedLoopSystem.
         Se x0 è fornito (shape (batch, 1, dim_internal) o (1, 1, dim_internal)),
         lo utilizza come stato; altrimenti usa self.x_init (replicato per batch se necessario).
         """
+        batch_size = y0.shape[0]
         if x0 is not None:
             # accetta sia (1,1,dim) sia (batch,1,dim)
             self.x = x0.clone().to(self.device)
+        elif y0 is not None:
+            self.x = torch.stack([
+                torch.linalg.lstsq(self.C2, y0[b, 0, :].unsqueeze(1))[0].T
+                for b in range(batch_size)
+                ], dim=0).to(self.device)
         else:
             # default behaviour: reset to x_init, replicate to batch_size se richiesto
             if batch_size is None:
                 self.x = self.x_init.clone().to(self.device)
             else:
                 self.x = self.x_init.detach().clone().repeat(batch_size, 1, 1).to(self.device)
+
 
     def y0_from_x0(self, x0: torch.Tensor) -> torch.Tensor:
         """
@@ -446,7 +462,7 @@ class REN_IQC_gamma(nn.Module):
         return F.linear(x0, self.C2)
 
 
-    def run(self, u_in):
+    def run(self, u_in, x0=None, y0=None):
         """
         Runs the forward pass of REN for a whole input sequence of length horizon.
 
@@ -457,8 +473,13 @@ class REN_IQC_gamma(nn.Module):
             y_out (torch.Tensor): Output with (batch_size, horizon, self.dim_out).
         """
 
-        self.reset()
-        y_log = self.y_init.detach().clone().repeat(u_in.shape[0], 1, 1)
+        self.reset(x0 = x0, y0 = y0)
+        if y0 is not None:
+            y_log = y0.detach().clone()
+        else:
+            y_log = self.y_init.detach().clone()
+       
+            
         for t in range(u_in.shape[1] - 1):
             y_log = torch.cat((y_log, self.forward(u_in[:, t:t + 1, :])), 1)
         # note that the last input is not used
@@ -487,8 +508,8 @@ class REN_IQC_gamma(nn.Module):
         )
         return param_dict
 
-    def __call__(self, u_in):
-        return self.run(u_in)
+    def __call__(self,u_in, x0=None, y0=None):
+        return self.run(u_in, x0, y0)
     
     
     
@@ -570,10 +591,11 @@ class DualREN(nn.Module):
         """Alias per run(), per coerenza con le singole REN"""
         return self.run(u0_seq, u1_seq)
 
-    def reset(self):
+    def reset(self, y0= None):
         """Reset both REN internal states."""
-        self.REN_0.reset()
-        self.REN_1.reset()
+        # in qualche modo è da separare e mandare separato
+        self.REN_0.reset(y0= torch.zeros_like(y0[:,:1,:1]))
+        self.REN_1.reset(y0= - y0[:,:1,:1])
         self.x = torch.cat((self.REN_0.x.to(self.device), self.REN_1.x.to(self.device)), dim=-1)
         self.y = torch.cat((self.REN_0.y_init.to(self.device), self.REN_1.y_init.to(self.device)), dim=-1)
 

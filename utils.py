@@ -82,3 +82,24 @@ def ensure_3d(x):
         x = x.unsqueeze(-1)
     return x
 
+def fun_start_controller(train_loader, loaded_parameters, scaler_glucose, scaler_insulin, dataset):
+
+    CGM = dataset.CGM
+    sat_e = dataset.sat_e
+    
+    time_batches = [time_batch for _, (_, _, _, _, _, time_batch) in enumerate(train_loader)]
+    time_batches = time_batches[0]
+
+    current_time_index = (time_batches[:, 0].int()).unsqueeze(1)
+    previous_starting_index = (time_batches[:,0].int()-1).unsqueeze(1)
+    previous_int_duration = previous_starting_index + torch.arange(-loaded_parameters.PID_par.integral_duration, 1) 
+
+
+    saturation_error_init = scaler_insulin.denormalize(sat_e[previous_starting_index.long()].reshape_as(previous_starting_index))
+
+    y_0 = CGM[current_time_index.long()].reshape_as(current_time_index)
+    glucose_PID_init = scaler_glucose.denormalize(CGM[previous_int_duration.long()].reshape_as(previous_int_duration))
+
+    # initial saturation error, string of previous CGM measurament, current CGM measurement
+    return saturation_error_init, glucose_PID_init, y_0
+
