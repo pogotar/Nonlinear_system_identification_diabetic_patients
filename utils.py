@@ -11,8 +11,8 @@ def set_params():
     output_dim = [1, 1] # output dimensions
 
 
-    dim_internal = [3, 4] # \xi dimension -- number of states of REN
-    dim_nl = [2, 2] # dimension of the square matrix D11 -- number of _non-linear layers_ of the REN
+    dim_internal = [8, 8] # [3, 4] # \xi dimension -- number of states of REN
+    dim_nl = [8, 8] # [2, 2] # dimension of the square matrix D11 -- number of _non-linear layers_ of the REN
 
     y_init = torch.tensor([0.0, 0.0])
 
@@ -25,13 +25,13 @@ def set_params():
 
     # # # # # # # # Hyperparameters # # # # # # # #
     learning_rate = 1e-3
-    epochs = 1 # 500
+    epochs = 700 # 500
 
     # # # # # # # # Data path # # # # # # # #
 
     redo_save = True
 
-    exp_identifier = '1'
+    exp_identifier = 'train_batched'
     num_days = 30  # 30 2
 
     string_noise = ''
@@ -87,8 +87,17 @@ def fun_start_controller(train_loader, loaded_parameters, scaler_glucose, scaler
     CGM = dataset.CGM
     sat_e = dataset.sat_e
     
-    time_batches = [time_batch for _, (_, _, _, _, _, time_batch) in enumerate(train_loader)]
-    time_batches = time_batches[0]
+    processed = []
+    for batch in train_loader:
+        time_batch = batch[-1]
+
+        # Se manca la dimensione batch, aggiungila
+        if time_batch.dim() == 1:
+            time_batch = time_batch.unsqueeze(0)   # (1, seq_len)
+
+        processed.append(time_batch)
+
+    time_batches = torch.cat(processed, dim=0)
 
     current_time_index = (time_batches[:, 0].int()).unsqueeze(1)
     previous_starting_index = (time_batches[:,0].int()-1).unsqueeze(1)
