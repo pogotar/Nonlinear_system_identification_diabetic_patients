@@ -449,7 +449,7 @@ class ClosedLoopSystem(nn.Module):
         y0 = self.system_model.y0_from_x0(x0)
         return y0
 
-    def forward(self, u_ext):
+    def forward(self, u_ext, time):
         """
         Compute the next output of the system.
 
@@ -459,15 +459,32 @@ class ClosedLoopSystem(nn.Module):
         Returns:
             torch.Tensor: Next output at t+1. shape = (batch_size, 1, output_dim)
         """
+        
+        dim_in_0 = self.system_model.REN_0.dim_in
+        dim_in_1 = self.system_model.REN_1.dim_in
+        
+        u0 = u_ext[:, :, :dim_in_0]
+        u1 = u_ext[:, :, dim_in_0:dim_in_0 + dim_in_1]
+        
 
         #Compute next state and output
-        control_u = self.controller.forward(self.y_prev)  # Compute control input
-        # minus sign for the control input
+        control_u, _, _, _ = self.controller.forward(self.y_prev.squeeze(dim=1), time)
+        
+        
+        control_u = control_u.unsqueeze(dim=1)
+        
         if self.negative:
             control_u = -control_u
-        u = control_u + u_ext
-        y = self.system_model.forward(u)
-        self.y_prev = y
+
+        # Sommo il controllo solo a u1
+        u1_controlled = u1 + control_u
+
+        # Passo avanti del sistema
+        y = self.system_model.forward(u0, u1_controlled)
+
+        # Aggiorno y_prev
+        # self.y_prev = y
+
         return y
 
 
@@ -502,21 +519,183 @@ class ClosedLoopSystem(nn.Module):
         dim_in_1 = self.system_model.REN_1.dim_in
 
         for i, t in enumerate(time[0,:,0]):
+            
+            
             y_traj.append(y)  # Store output
             t_batch = time[:, i:i+1, :].view(batch_size, 1)  # Current time step
             control_u, _, _,_ = self.controller.forward(self.y_prev.squeeze(dim=1), t_batch)  # Compute control input
+            # I, I_rwgn, I_sat, R
+
             control_u = control_u.unsqueeze(dim=1)  # Aggiungo dimensione time
             if self.negative:
                 control_u = -control_u
 
-            # Prendo u0 dalla sequenza u_ext 
+            # Prendo u0 dalla sequenza u_ext e sommo il controllo
             u0_t = u_ext[:, i:i+1, :dim_in_0] 
 
-            # Prendo u1 dalla sequenza u_ext e sommo il controllo
+            # Prendo u1 dalla sequenza u_ext
             u1_t = u_ext[:, i:i+1, dim_in_0:dim_in_0+dim_in_1]+ control_u
+            
+
 
             # Forward DualREN passo per passo
             y = self.system_model.forward(u0_t, u1_t)
+            
+        
+
+            # Concateno per salvare la traiettoria degli input
+            u_traj.append(torch.cat((u0_t, u1_t), dim=-1))
+
+            self.y_prev = y
+
+        # Convert lists to tensors
+        y_traj = torch.cat(y_traj, dim=1)  # Shape: (batch_size, horizon, output_dim)
+        u_traj = torch.cat(u_traj, dim=1)  # Shape: (batch_size, horizon, input_dim)
+
+        return u_traj, y_traj
+
+    def __call__(self, u_ext, time, y0=None):
+        """
+        Args:
+            x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
+            u_ext (torch.Tensor): External input signal. Shape = (batch_size, horizon, input_dim)
+            output_noise_std: standard deviation of output noise
+
+        Returns:
+            torch.Tensor: Trajectories of outputs (batch_size, horizon, output_dim) [y0, ..., y_T-1]
+        """
+        return self.run(u_ext, time, y0=y0)
+    
+    
+    
+
+    
+class Double_closed_loop(nn.Module):
+    """Simulates the closed-loop system (Plant + Controller)."""
+
+    def __init__(self, system_model, controller, negative: bool = False):
+        super().__init__()
+        self.system_model = system_model
+        self.controller = controller
+        self.negative = negative
+        # self.output_dim = self.system_model.output_dim
+        # self.input_dim = self.system_model.input_dim
+        # self.state_dim = self.system_model.state_dim
+
+        # just self does not register anything in the state dict of the model, it doesn't go to the specified device
+        # TODO: maybe the controller should have its state in the register buffer
+        self.register_buffer('x', None)
+        self.register_buffer('y_prev', None)
+
+    def reset(self,y0=None, saturation_error_init=None, glucose_PID_init=None):
+        """
+        Reset the internal state.
+
+        Args:
+            x0 (torch.Tensor, optional): Initial state, shape = (batch_size, 1, state_dim).
+            batch_size (int): Batch size for initialization.
+        """
+
+        self.system_model.reset(y0=y0)
+        self.controller.reset(saturation_error_init = saturation_error_init, glucose_PID_init = glucose_PID_init)
+        self.x = self.system_model.x
+        y0 = self.y0_from_x0(self.system_model.x)
+        self.y_prev = y0
+
+    def y0_from_x0(self, x0):
+        y0 = self.system_model.y0_from_x0(x0)
+        return y0
+
+    def forward(self, u_ext, time):
+        """
+        Compute the next output of the system.
+
+        Args:
+            u_ext (torch.Tensor): external input at t. shape = (batch_size, 1, input_dim)
+
+        Returns:
+            torch.Tensor: Next output at t+1. shape = (batch_size, 1, output_dim)
+        """
+        
+        # dim_in_0 = self.system_model.REN_0.dim_in
+        # dim_in_1 = self.system_model.REN_1.dim_in
+        
+        # u0 = u_ext[:, :, :dim_in_0]
+        # u1 = u_ext[:, :, dim_in_0:dim_in_0 + dim_in_1]
+        
+
+        # #Compute next state and output
+        # control_u, _, _, _ = self.controller.forward(self.y_prev.squeeze(dim=1), time)
+        # control_u = control_u.unsqueeze(dim=1)
+        
+        # if self.negative:
+        #     control_u = -control_u
+
+        # # Sommo il controllo solo a u1
+        # u1_controlled = u1 + control_u
+
+        # # Passo avanti del sistema
+        # y = self.system_model.forward(u0, u1_controlled)
+
+        # Aggiorno y_prev
+        # self.y_prev = y
+
+        return y
+
+
+    def run(self, u_ext, time, y0=None):
+        """
+        Simulates the closed-loop system for a given initial condition.
+
+        Args:
+            x0 (torch.Tensor): Initial state. Shape = (batch_size, 1, state_dim)
+            u_ext (torch.Tensor): External input signal. Shape = (batch_size, horizon, input_dim)
+            output_noise: realizations of output noise
+
+        Returns:
+            torch.Tensor: Trajectories of outputs (batch_size, horizon, output_dim) [y0, ..., y_T-1]
+        """
+
+        batch_size = u_ext.shape[0]
+        horizon = u_ext.shape[1]
+
+        # Storage for trajectories
+        y_traj = []
+        u_traj = []
+
+        self.system_model.reset(y0=y0)
+        # Use pre-generated noise
+        # y0 = self.y0_from_x0(self.system_model.x)
+        y = y0   # First noise realization
+        self.y_prev = y
+        
+        # dimensioni input delle due REN
+        dim_in_0 = self.system_model.REN_0.dim_in
+        dim_in_1 = self.system_model.REN_1.dim_in
+
+        for i, t in enumerate(time[0,:,0]):
+            
+            
+            y_traj.append(y)  # Store output
+            t_batch = time[:, i:i+1, :].view(batch_size, 1)  # Current time step
+            _, _, _,control_u = self.controller.forward(self.y_prev.squeeze(dim=1), t_batch)  # Compute control input
+            # I, I_rwgn, I_sat, R
+            
+            control_u = control_u.unsqueeze(dim=1)  # Aggiungo dimensione time
+
+
+            # Prendo u0 dalla sequenza u_ext e sommo il controllo
+            u0_t = u_ext[:, i:i+1, :dim_in_0] 
+
+            # Prendo u1 dalla sequenza u_ext
+            u1_t = control_u
+            
+
+
+            # Forward DualREN passo per passo
+            y = self.system_model.forward(u0_t, u1_t)
+            
+        
 
             # Concateno per salvare la traiettoria degli input
             u_traj.append(torch.cat((u0_t, u1_t), dim=-1))

@@ -427,6 +427,64 @@ class LoadData(Dataset):
         CGM = self.CGM[idx]
         time = self.time[idx]
         return MH.float(), I_rec.float(), R.float(),I_sat.float(), CGM.float(), time.float()
+    
+class SimpleLoadData:
+    """
+    returns, m, i, y : meal, insulin, glucose (all normalized) and as tensors
+    """
+    
+    def __init__(self, data_path, patient, scaler_insulin, scaler_glucose, scaler_meal):
+    
+
+        loaded = sio.loadmat(f'{data_path}/s#adult#{patient:03d}.mat')
+
+        # Insulin suggestions saturated (effectively given by the pump)
+        # I_data = loaded['injection']['signals'][0, 0]['values'][0, 0][1::5] / 6000  # now in U
+        # I_data = I_data[:,0]
+        # self.i = scaler_insulin.normalize(torch.from_numpy(I_data).float()) 
+        
+        I_ba_bo = loaded['injection']['signals'][0, 0]['values'][0, 0][1::5] / 6000
+        I_ba_bo = I_ba_bo[:,0]
+        I_ba_bo = torch.from_numpy(I_ba_bo).float()
+        # I_ba_bo = (I_ba_bo/loaded['Quest']['weight'][0,0])[0,:]# lo ha fatto t ma strano
+        
+        basal_values = loaded['basal_pattern_original']['values'][0, 0].flatten()
+        basal_time = loaded['basal_pattern_original']['time'][0, 0].flatten()
+        # Trova l’ultimo indice dove time <= ToD
+        
+        I_bo = torch.zeros_like(I_ba_bo)
+        for i in range(0, len(I_ba_bo)):
+
+            # Time of Day calculation
+            ToD = i * 5 % 1440
+            indices = np.where(basal_time <= ToD)[0]
+            if len(indices) > 0:
+                currentBasal = basal_values[indices[-1]]  # ultimo valore valido
+            else:
+                currentBasal = basal_values[-1]  # se nessun valore valido, prendi l’ultimo
+            basal = currentBasal
+
+            I_bo[i] = I_ba_bo[i] - basal / 60 * 5
+        
+        self.i = scaler_insulin.normalize(I_bo)
+            
+        CGM = loaded['G']['signals'][0, 0]['values'][0, 0][1::5].flatten()
+        self.y = scaler_glucose.normalize(torch.from_numpy(CGM).float())
+        true_carbs_hypo_redone_05 = loaded['carb_intake']['signals'][0, 0]['values'][0, 0][1:-1:2].flatten()
+        MH = true_carbs_hypo_redone_05.reshape(-1, 5).sum(axis=1)
+        self.m = scaler_meal.normalize(torch.from_numpy(MH).float())
+        self.time = torch.arange(0, len(self.y))
+        
+    def __len__(self):
+        return len(self.y)
+    
+    def __getitem__(self, idx):
+        m = self.m[idx]
+        i = self.i[idx]
+        y = self.y[idx]
+        time = self.time[idx]
+        
+        return m, i, y, time
 
 
 

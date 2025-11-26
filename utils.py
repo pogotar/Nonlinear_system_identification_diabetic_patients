@@ -17,7 +17,8 @@ def set_params():
     y_init = torch.tensor([0.0, 0.0])
 
     IQC_type = ['monotone', 'monotone'] # IQC constraint type: 'l2_gain', 'monotone', 'passive'
-    gamma = torch.tensor([0.3, 0.02])  # for IQC constraints
+    # gamma = torch.tensor([0.3, 0.02])  # for IQC constraints
+    gamma = torch.tensor([5, 500])
 
     use_noise = True
 
@@ -25,13 +26,15 @@ def set_params():
 
     # # # # # # # # Hyperparameters # # # # # # # #
     learning_rate = 1e-3
-    epochs = 700 # 500
+    epochs = 10 # 500
 
     # # # # # # # # Data path # # # # # # # #
 
     redo_save = True
+    redo_save_101_I = True
+    redo_save_101_M = True
 
-    exp_identifier = 'train_batched'
+    exp_identifier = 'temp' # train_batched
     num_days = 30  # 30 2
 
     string_noise = ''
@@ -42,7 +45,7 @@ def set_params():
     data_path = './data/train/sc_' + str(num_days) +  'days_identification' + string_noise + '/'
     model_folder = './models/exp' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
 
-    return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, data_path, model_folder, redo_save, ts, use_noise, num_days
+    return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, data_path, model_folder, redo_save, ts, use_noise, num_days, redo_save_101_I, redo_save_101_M
 
 
 def set_QR(gamma, input_dim, output_dim, IQC_type):
@@ -111,4 +114,31 @@ def fun_start_controller(train_loader, loaded_parameters, scaler_glucose, scaler
 
     # initial saturation error, string of previous CGM measurament, current CGM measurement
     return saturation_error_init, glucose_PID_init, y_0
+
+
+
+def fun_start_controller_simple(train_loader, dataset):
+
+    CGM = dataset.y
+    
+    processed = []
+    for batch in train_loader:
+        time_batch = batch[-1]
+
+        # Se manca la dimensione batch, aggiungila
+        if time_batch.dim() == 1:
+            time_batch = time_batch.unsqueeze(0)   # (1, seq_len)
+
+        processed.append(time_batch)
+
+    time_batches = torch.cat(processed, dim=0)
+
+    current_time_index = (time_batches[:, 0].int()).unsqueeze(1)
+
+
+    # already normalized
+    y_0 = CGM[current_time_index.long()].reshape_as(current_time_index)
+
+    # initial saturation error, string of previous CGM measurament, current CGM measurement
+    return y_0
 

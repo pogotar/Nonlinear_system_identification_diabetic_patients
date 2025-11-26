@@ -446,6 +446,7 @@ class REN_IQC_gamma(nn.Module):
                 torch.linalg.lstsq(self.C2, y0[b, 0, :].unsqueeze(1))[0].T
                 for b in range(batch_size)
                 ], dim=0).to(self.device)
+            self.y_init = y0.detach().clone().to(self.device)
         else:
             # default behaviour: reset to x_init, replicate to batch_size se richiesto
             if batch_size is None:
@@ -551,7 +552,7 @@ class DualREN(nn.Module):
         self.x = torch.cat((self.REN_0.x, self.REN_1.x), dim=-1)
         return y_out
     
-    def run(self, u0_seq: torch.Tensor, u1_seq: torch.Tensor) -> torch.Tensor:
+    def run(self, u0_seq: torch.Tensor, u1_seq: torch.Tensor, y0 = None) -> torch.Tensor:
         """
         Esegue il forward delle due REN su tutta una sequenza temporale.
         Usa il metodo forward() interno passo per passo.
@@ -561,7 +562,7 @@ class DualREN(nn.Module):
         Returns:
             y_seq: output sequence combinato (batch, time, dim_out)
         """
-        self.reset()  # reset degli stati iniziali
+        self.reset(y0 = y0)  # reset degli stati iniziali
 
         # il primo output parte da y_init
         y_init = self.REN_0.y_init.detach().clone().repeat(u0_seq.shape[0], 1, 1) \
@@ -587,15 +588,22 @@ class DualREN(nn.Module):
         y0_1 = self.REN_1.y0_from_x0(x0_1.to(self.REN_1.x.device))
         return y0_0 - y0_1
     
-    def __call__(self, u0_seq: torch.Tensor, u1_seq: torch.Tensor) -> torch.Tensor:
+    def __call__(self, u0_seq: torch.Tensor, u1_seq: torch.Tensor, y0 = None) -> torch.Tensor:
         """Alias per run(), per coerenza con le singole REN"""
-        return self.run(u0_seq, u1_seq)
+        return self.run(u0_seq, u1_seq, y0 = y0)
 
     def reset(self, y0= None):
         """Reset both REN internal states."""
         # in qualche modo è da separare e mandare separato
-        self.REN_0.reset(y0= torch.zeros_like(y0[:,:1,:1]))
-        self.REN_1.reset(y0= - y0[:,:1,:1])
+        if y0 is None:
+            # Pass None directly
+            self.REN_0.reset(y0=None)
+            self.REN_1.reset(y0=None)
+        else:
+            # Normal case
+            self.REN_0.reset(y0=torch.zeros_like(y0[:, :1, :1]))
+            self.REN_1.reset(y0=-y0[:, :1, :1])
+
         self.x = torch.cat((self.REN_0.x.to(self.device), self.REN_1.x.to(self.device)), dim=-1)
         self.y = torch.cat((self.REN_0.y_init.to(self.device), self.REN_1.y_init.to(self.device)), dim=-1)
 

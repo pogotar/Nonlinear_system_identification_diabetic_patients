@@ -342,4 +342,33 @@ class MinMaxScalerTorch:
         low = self.params['low']
         high = self.params['high']
         return x_norm * (high - low) + low
+    
+    
+class DummyScalerTorch:
+    def __init__(self):
+        """
+        Scaler fittizio che non modifica mai l'input.
+        Mantiene la stessa API di MinMaxScalerTorch.
+        """
+        self.params = {}
+
+    def compute_norm_indexes(self, x: torch.Tensor):
+        """
+        Mantiene la struttura della classe originale, 
+        ma non fa nulla.
+        """
+        self.params['low'] = torch.tensor(0.0)
+        self.params['high'] = torch.tensor(1.0)
+
+    def normalize(self, x: torch.Tensor):
+        """
+        Ritorna il tensor senza modificarlo.
+        """
+        return x
+
+    def denormalize(self, x_norm: torch.Tensor):
+        """
+        Ritorna il tensor senza modificarlo.
+        """
+        return x_norm
 
