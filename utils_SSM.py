@@ -34,7 +34,7 @@ def set_params():
     redo_save_101_I = True
     redo_save_101_M = True
 
-    exp_identifier = 'no_strat_3' # train_batched
+    exp_identifier = 'SSM_no_strat_3' # train_batched
     num_days = 30  # 30 2
 
     string_noise = ''
@@ -43,7 +43,7 @@ def set_params():
 
 
     data_path = './data/train/sc_' + str(num_days) +  'days_identification' + string_noise + '/'
-    model_folder = './models/exp' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
+    model_folder = './models/SSM/exp' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
 
     return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, data_path, model_folder, redo_save, ts, use_noise, num_days, redo_save_101_I, redo_save_101_M, exp_identifier
 
