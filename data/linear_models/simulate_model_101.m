@@ -1,3 +1,6 @@
+% 101 non si può usare perchè anche lui è identificato
+
+
 clear; close all; clc
 %% da modificare
 dati_paziente = [1:10];
@@ -12,8 +15,7 @@ currend_folder = pwd;
 [path_padre, nome_cartella, ~] = fileparts(currend_folder);
 
 main_folders = ["train", "test"];
-main_folders = ["test", "train"];
-
+% main_folders = ["test", "train"];
 
 load(['linearModels_adult_pop20.mat'])
 
@@ -38,13 +40,12 @@ for main_folder = main_folders
             % load inpulse response model
 
 
-            model_pers = load("adult#" + num2str(k,'%03i') + "_A.mat", "model");    % carico modello
+            model_pers = load("adult#" + num2str(101,'%03i') + "_A.mat", "model");    % carico modello
             model_pers = model_pers.model;
             model_101 = load("adult#" + num2str(101,'%03i') + "_A.mat", "model");
 
             load(folder_data + "\s#adult#" + num2str(k,'%03i'), "CGM", "injection", "carb_intake", "scenario", 'basal_pattern_original', "Quest", "G")
-
-  load ("C:\Users\pmong\OneDrive - Università di Pavia\EPFL\Nonlinear_system_identification_modified\data\train\sc_2days_identification" + "\s#adult#" + num2str(k,'%03i'), "iAP")
+            load ("C:\Users\pmong\OneDrive - Università di Pavia\EPFL\Nonlinear_system_identification_modified\data\train\sc_2days_identification" + "\s#adult#" + num2str(k,'%03i'), "iAP")
 
             injection_struct = injection;
 
@@ -498,3 +499,5 @@ function plot_glucose_insulin(varargin)
         linkaxes([ax1, ax3], 'x');
     end
 end
+
+

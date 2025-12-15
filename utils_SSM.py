@@ -1,4 +1,6 @@
 import torch
+import matplotlib.pyplot as plt
+
 
 def set_params():
     # # # # # # # # Parameters # # # # # # # #
@@ -142,3 +144,108 @@ def fun_start_controller_simple(train_loader, dataset):
     # initial saturation error, string of previous CGM measurament, current CGM measurement
     return y_0
 
+def plot_glucose_insulin(time, insulin=None, meal=None, glucose=None, 
+                         predicted_glucose=None, title='Glucose and Insulin vs Time'):
+    """
+    Plot Glucose/Meal (top) and Insulin (bottom, if present) with dual y-axes.
+    
+    Parameters:
+    - time: time array
+    - insulin: insulin array (optional)
+    - meal: meal array (optional)
+    - glucose: actual glucose array (optional)
+    - predicted_glucose: predicted glucose array (optional)
+    - title: plot title
+    """
+    
+    # Determina numero di subplot
+    n_plots = 1 if insulin is None else 2
+    
+    # Usa height_ratios per fare il secondo subplot più stretto
+    if n_plots == 2:
+        fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3.5 + 1.75), 
+                                 gridspec_kw={'height_ratios': [2, 1], 'hspace': 0.05})
+    else:
+        fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3.5))
+    
+    if n_plots == 1:
+        axes = [axes]
+    
+    # ===== PRIMO PLOT: Meal/Glucose =====
+    ax1 = axes[0]
+    
+    # Se c'è il secondo subplot, non mettere xticks visibili sul primo
+    if insulin is not None:
+        ax1.tick_params(axis='x', labelbottom=False)
+    else:
+        ax1.set_xlabel('Time step')
+    
+    # Meal a sinistra
+    if meal is not None:
+        ax1.plot(time, meal, color='mediumseagreen', label='Meal', zorder=2, linewidth=2, alpha=0.8)
+        ax1.set_ylabel('Meal (g)', color='mediumseagreen')
+        ax1.tick_params(axis='y', labelcolor='mediumseagreen')
+        ax1.spines['left'].set_color('mediumseagreen')
+    
+    # Glucose a destra
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Glucose (mg/dL)', color='tab:blue')
+    
+    if predicted_glucose is not None:
+        ax2.plot(time, predicted_glucose, color='darkblue', label='Predicted Glucose', 
+                zorder=20, linewidth=2, alpha=0.7)
+    
+    if glucose is not None:
+        ax2.plot(time, glucose, color='cornflowerblue', label='Glucose', 
+                zorder=10, linewidth=2, alpha=0.7)
+    
+    ax2.tick_params(axis='y', labelcolor='tab:blue')
+    ax2.spines['right'].set_color('blue')
+    
+    ax1.grid(True, alpha=0.3)
+    
+    # Legenda
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
+    
+    ax1.set_title(title, fontsize=14, fontweight='bold')
+    if meal is not None:
+        ax1.set_ylim(-0.1, max([max(meal) * 1.1, 3]))
+    # Limiti asse destro: 30-300 ma adatta se i dati sforano
+    if glucose is not None or predicted_glucose is not None:
+        min_val = 30
+        max_val = 300
+        
+        if glucose is not None and predicted_glucose is not None:
+            data_min = min(glucose.min(), predicted_glucose.min())
+            data_max = max(glucose.max(), predicted_glucose.max())
+        elif glucose is not None:
+            data_min = glucose.min()
+            data_max = glucose.max()
+        else:
+            data_min = predicted_glucose.min()
+            data_max = predicted_glucose.max()
+        
+        # Se i dati sforano, adatta i limiti
+        if data_min < min_val:
+            min_val = data_min * 0.95
+        if data_max > max_val:
+            max_val = data_max * 1.05
+        
+        ax2.set_ylim(min_val, max_val)
+    
+    # ===== SECONDO PLOT: Insulin (se presente) =====
+    if insulin is not None:
+        ax3 = axes[1]
+        ax3.set_xlabel('Time step')
+        ax3.plot(time, insulin, color='tab:red', label='Insulin', zorder=1, linewidth=2)
+        ax3.set_ylabel('Insulin (u1)', color='tab:red')
+        ax3.tick_params(axis='y', labelcolor='tab:red')
+        ax3.spines['left'].set_color('red')
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='upper right', fontsize=10)
+        ax3.set_ylim(-1, 10)
+    
+    fig.tight_layout()
+    plt.show()

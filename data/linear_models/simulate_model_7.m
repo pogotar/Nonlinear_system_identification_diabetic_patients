@@ -1,0 +1,226 @@
+% sette originario dell'acc, va bene ma v2 fatto meglio
+
+clear; close all; clc
+%% da modificare
+dati_paziente = [1:10];
+
+
+
+Ts = 5;     % [s] interpretati come minuti
+
+%%
+
+currend_folder = pwd;
+[path_padre, nome_cartella, ~] = fileparts(currend_folder);
+
+main_folders = ["train", "test"];
+main_folders = ["test", "train"];
+
+load(['linearModels_adult_pop20.mat'])
+
+
+
+for main_folder = main_folders
+
+    tot_path = path_padre + "\" + main_folder;
+
+    sottocartelle = trovaSottocartelle(tot_path);
+    sottocartelle(contains(sottocartelle, '101')) = [];
+
+    for sottocartella = sottocartelle
+
+        for k = dati_paziente
+
+            folder_data = string(tot_path + "\" + sottocartella{1} );
+
+            disp(folder_data)
+            disp(k)
+
+            % load inpulse response model
+
+
+            model_pers = load("PAV#" + num2str(7,'%03i') + "#iAP.mat", "model");    % carico modello
+            model_pers = model_pers.model;
+            model_101 = load("adult#" + num2str(101,'%03i') + "_A.mat", "model");
+
+            load(folder_data + "\s#adult#" + num2str(k,'%03i'), "CGM", "injection", "carb_intake", "scenario", 'basal_pattern_original', "Quest", "G")
+
+            injection_struct = injection;
+
+            % 1 min    continuo
+            injection       = injection_struct.signals.values/Quest.weight; %pmol/min --> pmol/min/Kg
+            carb_intake     = carb_intake.signals.values(1:2:end);
+            G               = G.signals.values;
+            continuous_time = injection_struct.time;
+
+            % equilibri
+            eq_CGM_impulse = Quest.Gb;  % rispetto ad usare equil i FIT vengono leggermente meglio
+            carb_eq        = 0;
+
+            % basale
+            num_giorni = ceil(length(injection)/1440);
+            basale_giornaliero = [];
+            basal_time_tot = [basal_pattern_original.time 1440];
+            for i = 1:length(basal_pattern_original.time)
+                basale_giornaliero = [basale_giornaliero; repmat(basal_pattern_original.values(i), basal_time_tot(i+1)- basal_time_tot(i),1)];
+            end
+            basale = repmat(basale_giornaliero,num_giorni,1);
+            basale = [basale(1); basale];
+
+            % se ricampiono a 5 senz aprima aver tolto il basale ho inizialmente degli zero e quindi devo vare 1:5:end
+            % il tutto / Ts
+
+            basale = basale(1:length(injection));
+
+            % x_solution = sum(injection(2:6*5)) / sum(basale(2:6*5))
+            x_solution = [1.7059 1.3325 1.8091 1.3909 1.5337 1.4373 1.4157 1.5321 1.5227 1.2496];
+            injection    = injection-basale;
+
+
+            % injection    = injection-basale; % !!! togliere 1.3 per come aveva fatto la prof
+
+            %%
+            G_sim_tot = lsim(model_pers,[injection,carb_intake],continuous_time); % modello qui è continuo
+            G_sim_continuo = G_sim_tot + eq_CGM_impulse;
+
+            %% effetti
+            A_i = model_pers.A(1:4,1:4);
+            B_i = model_pers.B(1:4,1);
+            C_i = model_pers.C(1,1:4);
+            D_i = model_pers.D(1,1);
+
+            % matrici dell'inpulse response dei pasti
+            A_d = model_pers.A(5:7,5:7);
+            B_d = model_pers.B(5:7,2);
+            C_d = model_pers.C(1,5:7);
+            D_d = model_pers.D(1,2);
+
+            G_sim_i = lsim(ss(A_i, B_i, C_i, D_i),injection,continuous_time);
+            G_sim_d = lsim(ss(A_d, B_d, C_d, D_d),carb_intake,continuous_time);
+
+            figure(1)
+            plot(continuous_time, G, LineWidth=1.5); hold on; grid on
+            plot(continuous_time, G_sim_tot+eq_CGM_impulse)
+            plot(continuous_time, G_sim_i+eq_CGM_impulse)
+            plot(continuous_time, G_sim_d+eq_CGM_impulse)
+            plot(continuous_time, G_sim_i + G_sim_d+eq_CGM_impulse, LineWidth=1.5)
+            legend({'G vera','G tot', 'G i', 'G d','G i + G d'}); title(['patient: ' num2str(k)]);
+
+            % ylim([30 400])
+            % xlim([1 3*24*60])
+
+            hold off
+
+            % folder_to_save = "./../../" + type_of_source + "/saved_G_i_G_sum_G_d/" + code_version;
+            %
+            % if ~exist(folder_to_save, 'dir')
+            %     % Create the folder if it does not exist
+            %     mkdir(folder_to_save);
+            %     disp(['Folder "', folder_to_save, '" has been created.']);
+            % end
+
+
+            % save( folder_to_save + "/s#adult#" + num2str(k,'%03i'), "G_sim_tot", "G_sim_i","G_sim_d","eq_CGM_impulse")
+
+
+
+            %% discreto
+
+            m_bar=equil(k).Ueq(1); % u eq
+            i_bar=equil(k).Ueq(2); % u eq
+            G_bar= equil(k).Yeq;   % y eq
+            x_bar= equil(k).Xeq;   % x eq
+
+
+            load(folder_data + "\s#adult#" + num2str(k,'%03i'), "CGM", "injection", "carb_intake", "scenario", 'basal_pattern_original', "Quest", "G")
+
+            model = c2d(model_pers,Ts);
+
+
+            % 1 min    continuo
+            carb_intake_2            = carb_intake.signals.values(1:2*Ts:end);
+            carb_intake     = carb_intake.signals.values(1:2:end);
+            G               = G.signals.values;
+            continuous_time = injection_struct.time;
+
+            % equilibri
+            eq_CGM_impulse = Quest.Gb;  % rispetto ad usare equil i FIT vengono leggermente meglio
+            carb_eq        = 0;
+
+
+            % resample
+            carb_intake_discreto     = carb_intake(2:Ts:end); % gi' estratto dalla struttura
+            G_discreto               = G(2:Ts:end); % % gi' estratto dalla struttura
+            time_discreto            = continuous_time(2:Ts:end);
+
+
+            %% injection
+            injection_struct = injection;
+
+            % 1 min    continuo
+            injection_2 = injection_struct.signals.values(2:Ts:end)/Quest.weight - i_bar; 
+            injection       = injection_struct.signals.values/Quest.weight; %pmol/min --> pmol/min/Kg
+
+            % basale
+            num_giorni = ceil(length(injection)/1440);
+            basale_giornaliero = [];
+            basal_time_tot = [basal_pattern_original.time 1440];
+            for i = 1:length(basal_pattern_original.time)
+                basale_giornaliero = [basale_giornaliero; repmat(basal_pattern_original.values(i), basal_time_tot(i+1)- basal_time_tot(i),1)];
+            end
+            basale = repmat(basale_giornaliero,num_giorni,1);
+            basale = [basale(1); basale];
+            basale = basale(1:length(injection));
+
+
+
+            % x_solution = sum(injection(2:6)) / sum(basale(2:6));
+            % injection    = injection-x_solution*basale;
+            injection    = injection-basale;
+
+            sum(injection(2:6))
+
+            injection_discreto = [];
+            for i=2:Ts:length(injection)
+                injection_discreto = [injection_discreto; sum(injection(i:i+Ts-1))];
+            end
+
+
+            injection_discreto = injection_discreto/Ts;
+
+
+
+
+            
+
+            % x_solution = [1.7059 1.3325 1.8091 1.3909 1.5337 1.4373 1.4157 1.5321 1.5227 1.2496];
+            % injection_discreto    = injection_discreto-x_solution(k)*basale;
+
+            %%
+
+            %
+            G_sim = lsim(model,[injection_discreto,carb_intake_discreto],time_discreto); % modello qui [ continuo
+            G_sim_2 = lsim(model,[injection_2,carb_intake_2(1:end-1)],time_discreto); 
+            G_sim_discreto= G_sim + eq_CGM_impulse;
+
+
+            %%
+            figure(10)
+            plot(time_discreto  , G_discreto);             hold on; grid on
+            plot(continuous_time, G_sim_continuo, LineWidth=5)
+            plot(time_discreto  , G_sim_discreto,LineWidth=2)
+            % plot(time_discreto  , G_sim_2,LineWidth=2)
+
+            legend({'G', 'G simulato continuo', 'G simulato discreto'});
+
+            title(['patient: ' num2str(k)]);
+
+            hold off
+
+        end
+
+    end
+
+end
+
+

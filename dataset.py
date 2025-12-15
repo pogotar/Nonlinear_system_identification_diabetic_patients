@@ -485,10 +485,7 @@ class SimpleLoadData:
         time = self.time[idx]
         
         return m, i, y, time
-
-
-
-
+    
 
 
 

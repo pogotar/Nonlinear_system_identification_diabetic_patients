@@ -1,3 +1,5 @@
+%% perfettoooooooooo  va bene, 7 originario dell'acc
+
 clear; close all; clc
 %% da modificare
 dati_paziente = [1:10];
@@ -13,7 +15,6 @@ currend_folder = pwd;
 
 main_folders = ["train", "test"];
 main_folders = ["test", "train"];
-
 
 load(['linearModels_adult_pop20.mat'])
 
@@ -38,13 +39,12 @@ for main_folder = main_folders
             % load inpulse response model
 
 
-            model_pers = load("adult#" + num2str(k,'%03i') + "_A.mat", "model");    % carico modello
+            model_pers = load("PAV#" + num2str(7,'%03i') + "#iAP.mat", "model");    % carico modello
             model_pers = model_pers.model;
             model_101 = load("adult#" + num2str(101,'%03i') + "_A.mat", "model");
 
             load(folder_data + "\s#adult#" + num2str(k,'%03i'), "CGM", "injection", "carb_intake", "scenario", 'basal_pattern_original', "Quest", "G")
-
-  load ("C:\Users\pmong\OneDrive - Università di Pavia\EPFL\Nonlinear_system_identification_modified\data\train\sc_2days_identification" + "\s#adult#" + num2str(k,'%03i'), "iAP")
+            load ("C:\Users\pmong\OneDrive - Università di Pavia\EPFL\Nonlinear_system_identification_modified\data\train\sc_2days_identification" + "\s#adult#" + num2str(k,'%03i'), "iAP")
 
             injection_struct = injection;
 
@@ -309,6 +309,7 @@ for main_folder = main_folders
 
                 disp(['delat G formula max:  ' num2str(CF/CR_min * delta_M)])
                 disp(['delat G formula min:  ' num2str(CF/CR_max * delta_M)])
+                disp(['delat G formula:  ' num2str(CF/iAP.RCM_param.CRpatientForModel * delta_M)])
 
             end
 
