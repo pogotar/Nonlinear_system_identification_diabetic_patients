@@ -50,32 +50,6 @@ def set_params():
     return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, data_path, model_folder, redo_save, ts, use_noise, num_days, redo_save_101_I, redo_save_101_M, exp_identifier
 
 
-def set_QR(gamma, input_dim, output_dim, IQC_type):
-    # IQC constraints
-    
-    torch.set_default_dtype(torch.float32) 
-        
-    if IQC_type == 'l2_gain':
-        # incremental L2 gain constraints
-        Q = (-1 / gamma) * torch.eye(output_dim, output_dim)  # -1/gamma * I
-        R = gamma * torch.eye(input_dim, input_dim)  # gamma * I
-        S = torch.zeros(output_dim, input_dim)  # 0
-
-    elif IQC_type == 'monotone':
-        eps = 1e-4
-
-        # monotone on l2
-        Q = torch.zeros(output_dim, output_dim) -eps * torch.eye(output_dim) # 0
-        R = - 2 * gamma * torch.eye(input_dim, input_dim)  # -2 nu I
-        S = torch.eye(output_dim, input_dim)  # I
-
-    elif IQC_type == 'passive':
-        # incrementally strictly output passive
-        Q = - 2 * gamma * torch.eye(output_dim, output_dim)  # - 2 rho I (Ho corretto da torch.ones a torch.eye come probabile intenzione)
-        R = torch.zeros(input_dim, input_dim)  # 0
-        S = torch.eye(output_dim, input_dim)  # I
-
-    return Q, R, S
 
 def ensure_3d(x):
     """ensures that tensors have dimension (batch, time, input_dim)."""
@@ -148,18 +122,20 @@ def plot_glucose_insulin(time, insulin=None, meal=None, glucose=None,
                          predicted_glucose=None, title='Glucose and Insulin vs Time'):
     """
     Plot Glucose/Meal (top) and Insulin (bottom, if present) with dual y-axes.
+    Meal points are shown as scatter only when non-zero.
     
     Parameters:
     - time: time array
     - insulin: insulin array (optional)
-    - meal: meal array (optional)
+    - meal: meal array (optional) - plotted as scatter for non-zero values
     - glucose: actual glucose array (optional)
     - predicted_glucose: predicted glucose array (optional)
     - title: plot title
     """
     
-    # Determina numero di subplot
-    n_plots = 1 if insulin is None else 2
+    # Determina numero di subplot: 2 solo se ci sono sia insulin che glucose/meal
+    has_glucose_or_meal = (glucose is not None or predicted_glucose is not None or meal is not None)
+    n_plots = 2 if (insulin is not None and has_glucose_or_meal) else 1
     
     # Usa height_ratios per fare il secondo subplot più stretto
     if n_plots == 2:
@@ -171,72 +147,96 @@ def plot_glucose_insulin(time, insulin=None, meal=None, glucose=None,
     if n_plots == 1:
         axes = [axes]
     
-    # ===== PRIMO PLOT: Meal/Glucose =====
+    # ===== PRIMO PLOT: Meal/Glucose (o solo Insulin) =====
     ax1 = axes[0]
     
     # Se c'è il secondo subplot, non mettere xticks visibili sul primo
-    if insulin is not None:
+    if n_plots == 2:
         ax1.tick_params(axis='x', labelbottom=False)
     else:
         ax1.set_xlabel('Time step')
     
-    # Meal a sinistra
-    if meal is not None:
-        ax1.plot(time, meal, color='mediumseagreen', label='Meal', zorder=2, linewidth=2, alpha=0.8)
-        ax1.set_ylabel('Meal (g)', color='mediumseagreen')
-        ax1.tick_params(axis='y', labelcolor='mediumseagreen')
-        ax1.spines['left'].set_color('mediumseagreen')
-    
-    # Glucose a destra
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('Glucose (mg/dL)', color='tab:blue')
-    
-    if predicted_glucose is not None:
-        ax2.plot(time, predicted_glucose, color='darkblue', label='Predicted Glucose', 
-                zorder=20, linewidth=2, alpha=0.7)
-    
-    if glucose is not None:
-        ax2.plot(time, glucose, color='cornflowerblue', label='Glucose', 
-                zorder=10, linewidth=2, alpha=0.7)
-    
-    ax2.tick_params(axis='y', labelcolor='tab:blue')
-    ax2.spines['right'].set_color('blue')
-    
-    ax1.grid(True, alpha=0.3)
-    
-    # Legenda
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
-    
-    ax1.set_title(title, fontsize=14, fontweight='bold')
-    if meal is not None:
-        ax1.set_ylim(-0.1, max([max(meal) * 1.1, 3]))
-    # Limiti asse destro: 30-300 ma adatta se i dati sforano
-    if glucose is not None or predicted_glucose is not None:
-        min_val = 30
-        max_val = 300
+    # Se solo insulin, mostra solo insulin nel primo plot
+    if insulin is not None and n_plots == 1:
+        ax1.set_xlabel('Time step')
+        ax1.plot(time, insulin, color='tab:red', label='Insulin', zorder=1, linewidth=2)
+        ax1.set_ylabel('Insulin (u1)', color='tab:red')
+        ax1.tick_params(axis='y', labelcolor='tab:red')
+        ax1.spines['left'].set_color('red')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend(loc='upper right', fontsize=10)
         
-        if glucose is not None and predicted_glucose is not None:
-            data_min = min(glucose.min(), predicted_glucose.min())
-            data_max = max(glucose.max(), predicted_glucose.max())
-        elif glucose is not None:
-            data_min = glucose.min()
-            data_max = glucose.max()
-        else:
-            data_min = predicted_glucose.min()
-            data_max = predicted_glucose.max()
+        # Ylim dinamico basato su max insulina
+        insulin_max = insulin.max()
+        ylim_options = [2.5, 5, 7.5, 10, 15, 20]
+        ylim = next((y for y in ylim_options if y >= insulin_max), ylim_options[-1])
+        ax1.set_ylim(-1, ylim)
         
-        # Se i dati sforano, adatta i limiti
-        if data_min < min_val:
-            min_val = data_min * 0.95
-        if data_max > max_val:
-            max_val = data_max * 1.05
+        ax1.set_title(title, fontsize=14, fontweight='bold')
+    else:
+        # Meal come scatter (solo punti non-zero)
+        if meal is not None:
+            # Filtra solo i valori non-zero
+            meal_nonzero_mask = meal != 0
+            meal_time = time[meal_nonzero_mask]
+            meal_values = meal[meal_nonzero_mask]
+            
+            ax1.scatter(meal_time, meal_values, color='mediumseagreen', label='Meal', 
+                       zorder=2, s=80, alpha=0.8, edgecolors='darkgreen', linewidth=1.5)
+            ax1.set_ylabel('Meal (mg)', color='mediumseagreen')
+            ax1.tick_params(axis='y', labelcolor='mediumseagreen')
+            ax1.spines['left'].set_color('mediumseagreen')
         
-        ax2.set_ylim(min_val, max_val)
+        # Glucose a destra
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('Glucose (mg/dL)', color='tab:blue')
+        
+        if predicted_glucose is not None:
+            ax2.plot(time, predicted_glucose, color='darkblue', label='Predicted Glucose', 
+                    zorder=20, linewidth=2, alpha=0.7)
+        
+        if glucose is not None:
+            ax2.plot(time, glucose, color='cornflowerblue', label='Glucose', 
+                    zorder=10, linewidth=2, alpha=0.7)
+        
+        ax2.tick_params(axis='y', labelcolor='tab:blue')
+        ax2.spines['right'].set_color('blue')
+        
+        ax1.grid(True, alpha=0.3)
+        
+        # Legenda
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
+        
+        ax1.set_title(title, fontsize=14, fontweight='bold')
+        if meal is not None:
+            ax1.set_ylim(-0.1, max([max(meal) * 1.1, 3]))
+        # Limiti asse destro: 30-300 ma adatta se i dati sforano
+        if glucose is not None or predicted_glucose is not None:
+            min_val = 30
+            max_val = 300
+            
+            if glucose is not None and predicted_glucose is not None:
+                data_min = min(glucose.min(), predicted_glucose.min())
+                data_max = max(glucose.max(), predicted_glucose.max())
+            elif glucose is not None:
+                data_min = glucose.min()
+                data_max = glucose.max()
+            else:
+                data_min = predicted_glucose.min()
+                data_max = predicted_glucose.max()
+            
+            # Se i dati sforano, adatta i limiti
+            if data_min < min_val:
+                min_val = data_min * 0.95
+            if data_max > max_val:
+                max_val = data_max * 1.05
+            
+            ax2.set_ylim(min_val, max_val)
     
-    # ===== SECONDO PLOT: Insulin (se presente) =====
-    if insulin is not None:
+    # ===== SECONDO PLOT: Insulin (se presente insieme a glucose/meal) =====
+    if insulin is not None and n_plots == 2:
         ax3 = axes[1]
         ax3.set_xlabel('Time step')
         ax3.plot(time, insulin, color='tab:red', label='Insulin', zorder=1, linewidth=2)
@@ -245,7 +245,15 @@ def plot_glucose_insulin(time, insulin=None, meal=None, glucose=None,
         ax3.spines['left'].set_color('red')
         ax3.grid(True, alpha=0.3)
         ax3.legend(loc='upper right', fontsize=10)
-        ax3.set_ylim(-1, 10)
+        
+        # Ylim dinamico basato su max insulina
+        insulin_max = insulin.max()
+        ylim_options = [1.5, 2.5, 5, 7.5, 10, 15, 20]
+        
+        # Trova il primo valore >= insulin_max
+        ylim = next((y for y in ylim_options if y >= insulin_max), ylim_options[-1])
+        
+        ax3.set_ylim(-0.5, ylim)
     
     fig.tight_layout()
     plt.show()

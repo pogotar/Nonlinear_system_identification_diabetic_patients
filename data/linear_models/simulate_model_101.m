@@ -196,6 +196,8 @@ for main_folder = main_folders
             %% injection
             % è approssimato (nel senso che approssima quello che entra nei modelli mentre è perfetto per tutta la pipeline python)
 
+            % basal_pattern_original  per openloop o pid
+            % basalBolusMem se mpc
             % 1 min    continuo
             injection       = injection_struct.signals.values(2:5:end)/6000; % U/5min
             basal_new = []; 
