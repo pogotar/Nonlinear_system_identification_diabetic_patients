@@ -12,7 +12,7 @@ currend_folder = pwd;
 [path_padre, nome_cartella, ~] = fileparts(currend_folder);
 
 main_folders = ["train", "test"];
-main_folders = ["test", "train"];
+% main_folders = ["test", "train"];
 
 
 load(['linearModels_adult_pop20.mat'])
@@ -160,73 +160,73 @@ for main_folder = main_folders
             % è corretto questo ma non era coerente con quello fatto in
             % python
 
-            % injection_struct = injection;
-            % 
-            % % 1 min    continuo
-            % injection       = injection_struct.signals.values/Quest.weight; %pmol/min --> pmol/min/Kg
-            % 
-            % % basale
-            % num_giorni = ceil(length(injection)/1440);
-            % basale_giornaliero = [];
-            % basal_time_tot = [basal_pattern_original.time 1440];
-            % for i = 1:length(basal_pattern_original.time)
-            %     basale_giornaliero = [basale_giornaliero; repmat(basal_pattern_original.values(i), basal_time_tot(i+1)- basal_time_tot(i),1)];
-            % end
-            % basale = repmat(basale_giornaliero,num_giorni,1);
-            % basale = [basale(1); basale];
-            % basale = basale(1:length(injection));
-            % 
-            % 
-            % 
-            % % x_solution = sum(injection(2:6)) / sum(basale(2:6));
-            % % injection    = injection-x_solution*basale;
-            % injection    = injection-basale;
-            % 
-            % sum(injection(2:6))
-            % 
-            % injection_discreto = [];
-            % for i=2:Ts:length(injection)
-            %     injection_discreto = [injection_discreto; sum(injection(i:i+Ts-1))];
-            % end
-            % 
-            % 
-            % injection_discreto_true = injection_discreto/Ts;
+            injection_struct = injection;
+
+            % 1 min    continuo
+            injection       = injection_struct.signals.values/Quest.weight; %pmol/min --> pmol/min/Kg
+
+            % basale
+            num_giorni = ceil(length(injection)/1440);
+            basale_giornaliero = [];
+            basal_time_tot = [basal_pattern_original.time 1440];
+            for i = 1:length(basal_pattern_original.time)
+                basale_giornaliero = [basale_giornaliero; repmat(basal_pattern_original.values(i), basal_time_tot(i+1)- basal_time_tot(i),1)];
+            end
+            basale = repmat(basale_giornaliero,num_giorni,1);
+            basale = [basale(1); basale];
+            basale = basale(1:length(injection));
+
+
+
+            % x_solution = sum(injection(2:6)) / sum(basale(2:6));
+            % injection    = injection-x_solution*basale;
+            injection    = injection-basale;
+
+            sum(injection(2:6))
+
+            injection_discreto = [];
+            for i=2:Ts:length(injection)
+                injection_discreto = [injection_discreto; sum(injection(i:i+Ts-1))];
+            end
+
+
+            injection_discreto_true = injection_discreto/Ts;
 
             %% injection
             % è approssimato (nel senso che approssima quello che entra nei modelli mentre è perfetto per tutta la pipeline python)
 
-            % 1 min    continuo
-            injection       = injection_struct.signals.values(2:5:end)/6000; % U/5min
-            basal_new = []; 
-            basal_tot = [];
-            for i = 1:length(injection)
-                % Time of Day calculation
-                ToD = mod(i * 5 - 1, 1440);
-
-                % Find indices where basal_time <= ToD
-                indices = find(basal_pattern_original.time <= ToD);
-
-                if ~isempty(indices)
-                    currentBasal = basal_pattern_original.values(indices(end));  % ultimo valore valido
-                else
-                    currentBasal = basal_pattern_original.values(end);  % se nessun valore valido, prendi l'ultimo
-                end
-
-                basal = currentBasal;
-                basal_tot = [basal_tot basal];
-            end
-
-            basal_tot = basal_tot'/ 60 * 5; % U
-
-            x_solution = sum(injection(2:24)) / sum(basal_tot(2:24));
-            disp(['x_solution discreto: ' mat2str(x_solution)])
-            x_solution = 1;
-
-            injection = injection*(1/Ts)*6000/Quest.weight; % pmol/5min/kg
-
-            basal_tot = basal_tot*(1/Ts)*6000/Quest.weight; % pmol/5min/kg
-
-            injection_discreto = injection - basal_tot;
+            % % 1 min    continuo
+            % injection       = injection_struct.signals.values(2:5:end)/6000; % U/5min
+            % basal_new = []; 
+            % basal_tot = [];
+            % for i = 1:length(injection)
+            %     % Time of Day calculation
+            %     ToD = mod(i * 5 - 1, 1440);
+            % 
+            %     % Find indices where basal_time <= ToD
+            %     indices = find(basal_pattern_original.time <= ToD);
+            % 
+            %     if ~isempty(indices)
+            %         currentBasal = basal_pattern_original.values(indices(end));  % ultimo valore valido
+            %     else
+            %         currentBasal = basal_pattern_original.values(end);  % se nessun valore valido, prendi l'ultimo
+            %     end
+            % 
+            %     basal = currentBasal;
+            %     basal_tot = [basal_tot basal];
+            % end
+            % 
+            % basal_tot = basal_tot'/ 60 * 5; % U
+            % 
+            % x_solution = sum(injection(2:24)) / sum(basal_tot(2:24));
+            % disp(['x_solution discreto: ' mat2str(x_solution)])
+            % x_solution = 1;
+            % 
+            % injection = injection*(1/Ts)*6000/Quest.weight; % pmol/5min/kg
+            % 
+            % basal_tot = basal_tot*(1/Ts)*6000/Quest.weight; % pmol/5min/kg
+            % 
+            % injection_discreto = injection - basal_tot;
 
         
 

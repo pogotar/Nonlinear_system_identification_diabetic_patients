@@ -1,8 +1,10 @@
 import torch
 import matplotlib.pyplot as plt
+import openpyxl
 
 
-def set_params():
+
+def set_params(root, exp_identifier=None, folder_model_101=None, epochs = None, epochs_101 = None):
     # # # # # # # # Parameters # # # # # # # #
     
     torch.set_default_dtype(torch.float32) 
@@ -22,13 +24,23 @@ def set_params():
     # gamma = torch.tensor([0.3, 0.02])  # for IQC constraints
     gamma = torch.tensor([5, 500])
 
-    use_noise = True
+    use_noise = False
 
     ts = 5  # Sampling time (minutes)
 
+
+
+
+
+
+
     # # # # # # # # Hyperparameters # # # # # # # #
     learning_rate = 1e-3
-    epochs = 10 # 500
+    
+    if epochs is None:
+        epochs = 2000 # 500
+    if epochs_101 is None:
+        epochs_101 = 2000
 
     # # # # # # # # Data path # # # # # # # #
 
@@ -36,18 +48,27 @@ def set_params():
     redo_save_101_I = True
     redo_save_101_M = True
 
-    exp_identifier = 'SSM_no_strat_3' # train_batched
+    if exp_identifier is None:
+        exp_identifier = '3' # train_batched exp_1
+        
     num_days = 30  # 30 2
+    
+    if folder_model_101 is None:
+        folder_model_101 = 'baseline' 
+
+   
 
     string_noise = ''
     if use_noise:
         string_noise = '_rwgn'
 
 
-    data_path = './data/train/sc_' + str(num_days) +  'days_identification' + string_noise + '/'
-    model_folder = './models/SSM/exp' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
+    data_path = f'{root}/data/train/sc_' + str(num_days) +  'days_identification' + string_noise + '/'
+    model_folder = f'{root}/models/SSM/exp_' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
 
-    return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, data_path, model_folder, redo_save, ts, use_noise, num_days, redo_save_101_I, redo_save_101_M, exp_identifier
+
+
+    return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, epochs_101, data_path, model_folder, redo_save, ts, use_noise, num_days, redo_save_101_I, redo_save_101_M, exp_identifier, folder_model_101
 
 
 
@@ -257,3 +278,75 @@ def plot_glucose_insulin(time, insulin=None, meal=None, glucose=None,
     
     fig.tight_layout()
     plt.show()
+    
+    
+def modify_xlsx_row_and_column(file_path, modifiche):
+    """
+    Modifica valori cercando la colonna per NOME (dalla prima riga).
+    Crea automaticamente le colonne mancanti nella posizione disponibile.
+    
+    Args:
+        file_path: percorso del file .xlsx (es: 'dati.xlsx')
+        modifiche: dict dove:
+                   - chiave: nome della colonna (da prima riga)
+                   - valore: dict con {numero_riga: nuovo_valore}
+    
+    Esempio:
+        modifiche = {
+            'Nome': {2: 'Marco', 5: 'Luca'},
+            'Età': {2: 30, 5: 25},
+            'Stipendio': {3: 2500, 7: 3000},
+        }
+        modify_xlsx_row_and_column('dati.xlsx', modifiche)
+    """
+    wb = openpyxl.load_workbook(file_path)
+    ws = wb.active
+    
+    # Leggi la prima riga per trovare i nomi delle colonne
+    intestazione = {}
+    for col_idx, cell in enumerate(ws[1], start=1):
+        if cell.value:
+            intestazione[cell.value] = col_idx
+    
+    # Trova la prossima colonna disponibile
+    prossima_col_libera = max(intestazione.values()) + 1 if intestazione else 1
+    
+    # Crea le colonne mancanti nell'ordine in cui le passi
+    for nome_colonna in modifiche.keys():
+        if nome_colonna not in intestazione:
+            ws.cell(row=1, column=prossima_col_libera).value = nome_colonna
+            intestazione[nome_colonna] = prossima_col_libera
+            print(f"✓ Colonna '{nome_colonna}' creata nella posizione {prossima_col_libera}")
+            prossima_col_libera += 1
+    
+    # Modifica le celle
+    for nome_colonna, righe_valori in modifiche.items():
+        col_idx = intestazione[nome_colonna]
+        
+        for riga, valore in righe_valori.items():
+            ws.cell(row=riga, column=col_idx).value = valore
+            print(f"Modificato {nome_colonna} (riga {riga}): {valore}")
+    
+    wb.save(file_path)
+    print(f"\n✓ File {file_path} aggiornato con successo")
+    
+def FIT_formula(y_true, y_hat):
+    """
+    Calcola il FIT basato sulla formula:
+    FIT = 100 * (1 - (||y - y_hat|| / ||y - mean(y)||))
+    
+    Args:
+        y_true: array dei valori reali
+        y_hat: array dei valori predetti
+    
+    Returns:
+        FIT in percentuale
+    """
+    import numpy as np
+
+    
+    numerator = np.linalg.norm(y_hat - y_true, ord=2)
+    denominator = np.linalg.norm(y_true - np.mean(y_true), ord=2)
+    FIT = 100 * (1 - numerator / denominator)
+    
+    return FIT
