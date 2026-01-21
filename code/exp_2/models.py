@@ -318,7 +318,7 @@ class NonLinearController_p2(nn.Module):
         I = basal / 60 * P.PID_par.ts_measurement + bolus  # MODIFICATO PER BATCH
 
         # Rumore batch-wise
-        rwgn_instantaneous = torch.zeros(batch_size, dtype=torch.float32)  # MODIFICATO PER BATCH
+        rwgn_instantaneous = torch.zeros(batch_size,1, dtype=torch.float32)  # MODIFICATO PER BATCH
         if use_noise:
             mu = 0
             sigma = torch.min(basal_vec.values) / 60 * P.PID_par.ts_measurement * 0.4

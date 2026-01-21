@@ -1,3 +1,4 @@
+from logging import root
 import torch
 import torch.nn as nn
 import numpy as np
@@ -7,7 +8,6 @@ from datetime import datetime, timedelta
 from torch.utils.data import Dataset
 from pathlib import Path
 
-
 class Parameter:
     
     torch.set_default_dtype(torch.float32) 
@@ -16,6 +16,7 @@ class Parameter:
         self.PID_par = self.PID_par()
         self.pumpParameter = self.pumpParameter()
         
+                # Rileva dove sei attualmente
         current_dir = Path.cwd()
 
         # Se sei dentro code/exp_X, torna alla radice
@@ -49,6 +50,7 @@ class Parameter:
             self.CF = torch.from_numpy(iAP_data['iAP']['RCM_param'][0,0]['CFpatientForModel'][0,0][0]).double()
             self.CR_101 = torch.tensor([20])
             self.CF_101 = torch.tensor([40])
+            
 
     class pumpParameter:
         quantum = torch.tensor([0.05])
@@ -357,6 +359,25 @@ class MinMaxScalerTorch:
         low = self.params['low']
         high = self.params['high']
         return x_norm * (high - low) + low
+    
+    def __getstate__(self):
+        """Support for pickling - called by torch.save()"""
+        state = {}
+        for key, value in self.params.items():
+            if isinstance(value, torch.Tensor):
+                state[key] = value.cpu().item() if value.numel() == 1 else value.cpu().numpy()
+            else:
+                state[key] = value
+        return state
+    
+    def __setstate__(self, state):
+        """Support for unpickling - called by torch.load()"""
+        self.params = {}
+        for key, value in state.items():
+            if isinstance(value, np.ndarray):
+                self.params[key] = torch.from_numpy(value)
+            else:
+                self.params[key] = torch.tensor(value)
     
     
 class DummyScalerTorch:

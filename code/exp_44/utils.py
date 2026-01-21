@@ -1,6 +1,6 @@
 import torch
 
-def set_params(root):
+def set_params():
     # # # # # # # # Parameters # # # # # # # #
     
     torch.set_default_dtype(torch.float32) 
@@ -20,7 +20,7 @@ def set_params(root):
     # gamma = torch.tensor([0.3, 0.02])  # for IQC constraints
     gamma = torch.tensor([5, 500])
 
-    use_noise = False
+    use_noise = True
 
     ts = 5  # Sampling time (minutes)
 
@@ -42,8 +42,8 @@ def set_params(root):
         string_noise = '_rwgn'
 
 
-    data_path = f'{root}/data/train/sc_' + str(num_days) +  'days_identification' + string_noise + '/'
-    model_folder = f'{root}/models/SSM/exp_' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
+    data_path = './data/train/sc_' + str(num_days) +  'days_identification' + string_noise + '/'
+    model_folder = './models/exp' + exp_identifier + '_' + str(num_days) + 'days' + string_noise + '/'
 
     return x0, input_dim, output_dim, dim_internal, dim_nl, y_init, IQC_type, gamma, learning_rate, epochs, data_path, model_folder, redo_save, ts, use_noise, num_days, redo_save_101_I, redo_save_101_M, exp_identifier
 

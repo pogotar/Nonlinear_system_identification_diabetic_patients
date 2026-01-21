@@ -66,9 +66,9 @@ simulate_model_v2_final -> è corretto nel processamento dati in discreto
 | exp_7 | - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min (insulina, pat i) → 0.8 \n - rmax → 0.95 \n - model_folder_101 = ‘6‘ \n prior loss = 1 |
 | exp_8 | copiata da 4 ma prior loss pesata 0.1 \n - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 0.1 |
 | exp_9 | copiata da 4 ma prior loss pesata 0.01 \n - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 0.01 |
-| exp_10 | copiata da 9 \n tranne che moltiplicato per 1 e    error > 0, \n 1000 \\\* torch.abs(error),  # errore positivo: 1000
-1\.0 \\\* torch.abs(error)   # errore negativo: pesato1
-) \| |
+| exp_10 | copiata da 9 \n tranne che moltiplicato per 1 e    error > 0, \n 1000 \\\* torch.abs(error),  # errore positivo: 1000 |
+| 1.0 \\\* torch.abs(error)   # errore negativo: pesato1 |    |
+| ) \| |    |
 
 pensare se pinball
 
@@ -76,9 +76,7 @@ pensare se iob e quanto mettere di tempo assestamento 4 o 5 ore
 
 pensare se mettere tempo assestamento 4 ore e tenere sum e basta
 
-pesare di meno
 
-tempo più lungo
 
 se non funziona nulla taglio forza CR (magari mascherandola con pinball loss)
 
@@ -89,3 +87,14 @@ sc_1_day_test_IR_insulin_30g_13h
 sc_1_day_test_IR_insulin_60g_15h
 
 10 + sono con il test insulina meno forte
+
+
+
+
+---
+
+34 → come 4 ma strategy 1 and 2 + test meno forte su insulina (30 g al posto di 60)
+
+
+
+44  come 34 ma con prior su derivata

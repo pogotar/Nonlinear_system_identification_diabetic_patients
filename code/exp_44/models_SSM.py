@@ -4,192 +4,14 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 from utils_SSM import set_params, ensure_3d, fun_start_controller, fun_start_controller_simple, plot_glucose_insulin
+import torch.nn.functional as F
+
 
 
 torch.set_printoptions(precision=17)
 
-# class NonLinearController(nn.Module):
 
 
-
-
-# def monotonic_gain_loss(y_hat, u, horizon=36, gain_threshold=0.1):
-#     """
-#     Enforces positive gain over a horizon for positive inputs (VECTORIZED).
-#     The one thought by professor, u_t * max(y_(t,t+k)) >= gain
-    
-#     Args:
-#         y_hat: (batch_size, time, output_dim) - predicted output
-#         u: (batch_size, time, input_dim) - input signal
-#         horizon: number of steps to look ahead (default 12*3=36)
-#         gain_threshold: minimum gain desired
-    
-#     Returns:
-#         loss: scalar tensor
-#     """
-#     batch_size, time_steps, output_dim = y_hat.shape
-    
-#     # Crea tensor con u_t shiftato per ogni timestep
-#     u_expanded = u[:, :time_steps - horizon, :].unsqueeze(2) # uguale ad u ma taglio ultima parte e aggiunge una dimensione come horizon
-#     # u_expanded: (batch_size, time_steps - horizon, 1, input_dim)
-    
-#     # Crea tensor con y_t+k per k in [0, horizon)
-#     y_shifted = []
-#     for k in range(horizon):
-#         y_shifted.append(y_hat[:, k: time_steps - horizon + k, :])
-#     y_shifted = torch.stack(y_shifted, dim=2)
-#     # y_shifted: (batch_size, time_steps - horizon, horizon, output_dim)
-    
-#     # Calcola u_t * y_t+k per tutti t e k
-#     u_y_product = (u_expanded * y_shifted).sum(dim=-1)
-#     # u_y_product: (batch_size, time_steps - horizon, horizon)
-
-#     # Prendi il massimo per ogni timestep t
-#     u_y_product_max = u_y_product.max(dim=2)[0]
-#     # u_y_product_max: (batch_size, time_steps - horizon)
-    
-#     # Calcola "forza" dell'impulso: norma di u_t
-#     u_magnitude = torch.zeros(batch_size, time_steps - horizon, device=u.device)
-#     cumulative_window = horizon # finestra cumulativa per sommare l'insulina precedente, sempra una buona cosa metterla come horizon ma in realtà probabilmente da modificare
-#     for t in range(time_steps - horizon):
-#         # Prendi insulina dai tempi precedenti: max(0, t - cumulative_window) : t
-#         start_idx = max(0, t - cumulative_window)
-#         u_window = u[:, start_idx:t, :].sum(dim=1)  # (batch, input_dim)
-#         u_magnitude[:, t] = u_window.squeeze(-1) if u_window.size(-1) == 1 else u_window.norm(dim=-1)
-#     # u_magnitude: (batch, time_steps - horizon)
-#     # u_magnitude[b, t] = somma dell'insulina nei 36 step precedenti per il sample b
-    
-    
-#     # Calcola penalità
-#     penalita = torch.nn.functional.relu(gain_threshold - u_y_product_max)
-    
-
-#     # Pesa solo quando u è diverso da zero
-#     weighted_penalita = penalita * u_magnitude
-    
-#     # Normalizza per la somma delle magnitudini (non per il numero di elementi)
-#     loss_mono = weighted_penalita.sum() / (u_magnitude.sum() + 1e-8)
-    
-    
-#     return loss_mono
-
-
-def monotonic_gain_loss(y_hat, u, scaler_y, scaler_u, y, evaluate = 'meal', cumulative_window = 12*1.5, horizon=12*1.5, 
-                        aggressive_coeff=0.7, CR = 1.0, CF = 1.0, G_bar = torch.tensor([110]), return_debug=False):
-    """
-    Enforces positive gain over a horizon for positive inputs (VECTORIZED).
-    
-    I don't have the true y since this loss is  for the prediction of each SSM not their summed prediction.
-    
-    Args:
-        y_hat: (batch_size, time, output_dim) - predicted output
-        u: (batch_size, time, input_dim) - input signal
-        scaler_y: scaler for output
-        scaler_u: scaler for input
-        evaluate: 'meal' or 'insulin' - whether to evaluate meal (max glucose) or insulin (min glucose)
-        cumulative_window = 12*1.5: number of steps to consider for input sum
-        horizon: number of steps to look ahead for the min-max (default 12*1.5)
-        aggressive_coeff: coefficient to scale the input effect aggressive_coeff * (CF/CR * delta_u_sum_denorm) - delta_y_max_denorm 
-        CR: carbohydrate ratio
-        CF: correction factor
-        G_bar: target glucose level (denormalized)
-    
-    Returns:
-        loss: scalar tensor
-    """
-    
-    cumulative_window = int(cumulative_window)
-    horizon = int(horizon)
-    
-    # dimension = sliding su dimensione 1 tempo
-    # size = quanto è grande la sliding window
-    # step = di quanto la sposto in avanti
-    # restituisce 
-    # u.shape                                                           torch.Size([12, 600, 1])    
-    #u.unfold(dimension = 1, size = cumulative_window, step = 1)        torch.Size([12, 565 = 600-12+1, 1, 12])            
-    u_shifted = u.unfold(dimension = 1, size = cumulative_window, step = 1) # torch.Size([12, 565, 1, 12])  
-    u_shifted = u_shifted.permute(0, 1, 3, 2) # torch.Size([12, 565, 12, 1])  
-    
-    # non me ne faccio nulla degli input sommati se non ho le predizioni
-    u_shifted = u_shifted[:, : -horizon, :, :]  # torch.Size([12, 529, 12, 1])
-
-    # somma delle 
-    u_sum = u_shifted.sum(dim=2)  # torch.Size([12, 529, 1])
-    
-    if evaluate == 'meal':
-        u_sum_denorm = scaler_u.denormalize(u_sum)*1000/15  # TODO non mi pare correttissima questa conversione (neanche troppo scorretta)
-    elif evaluate == 'insulin':
-        u_sum_denorm = scaler_u.denormalize(u_sum) 
-        
-    delta_u_sum_denorm = (u_sum_denorm - torch.min(u_sum_denorm))
-    
-    
-    y_hat_shifted = y_hat.unfold(dimension = 1, size = horizon, step = 1) # torch.Size([12, 541, 1, 36])
-    y_hat_shifted = y_hat_shifted.permute(0, 1, 3, 2)
-    
-    # non me ne faccio nulla delle predizioni se tanto non ho gli input sommati
-    y_hat_shifted = y_hat_shifted[:, cumulative_window: , :, :] # torch.Size([12, 529, 36, 1])
-
-
-    
-    if evaluate == 'meal':
-        # prendo il massimo della predizione in orizzonte
-        y_max = y_hat_shifted.max(dim=2)[0]  # torch.Size([12, 529, 1])
-        delta_y_max_denorm = scaler_y.denormalize(y_max) - G_bar 
-        error = scaler_y.normalize(aggressive_coeff * (CF/CR * delta_u_sum_denorm) - delta_y_max_denorm  )
-    elif evaluate == 'insulin':
-        # prendo il minimo della predizione in orizzonte
-        y_min = y_hat_shifted.min(dim=2)[0]  # torch.Size([12, 529, 1])
-        delta_y_max_denorm = G_bar - scaler_y.denormalize(y_min)
-        prior_delta_y = - CF * delta_u_sum_denorm
-        
-        # delta_y_denorm = G_bar - scaler_y.denormalize(y_hat[:, cumulative_window:-horizon+1, :])
-        # error = scaler_y.normalize(aggressive_coeff * prior_delta_y - delta_y_max_denorm)
-        
-        delta_y_denorm = scaler_y.denormalize(y_hat[:, cumulative_window:-horizon+1, :])- G_bar
-        error = scaler_y.normalize(aggressive_coeff * prior_delta_y - delta_y_denorm)
-    
-
-    # se predizione in val assoluto minore di prior errore positivo 
-
-    # errore solo se predizione sotto il prior
-    # penality = torch.nn.functional.relu(error)
-    penality = torch.abs(error)  
-
-    # Peso di più se u_sum è grande (dovrebbe essere robusto sia con impulsi di insulina sia con PID)
-    # se u_sum è piccolo, il mio prior è abbastanza inutile quindi ha senso moltiplicare tutto per questo
-    # weighted_penality = penality * u_sum + 1e-3
-    
-    # # Normalizza per la somma delle magnitudini
-    # loss_mono = weighted_penality.sum() / (u_sum.sum() + 1e-8)
-    
-    loss_mono = penality.sum() / (u_sum.sum() + 1e-8)
-    
-    # plt.figure()
-    # a = CF/CR *delta_u_sum_denorm[0,:,0].detach().cpu().numpy()
-    # plt.plot(a)
-    # plt.plot(delta_y_max_denorm[0,:,0].detach().cpu().numpy())
-    # plt.plot(scaler_y.denormalize(y[0,cumulative_window:-horizon,0]).detach().cpu().numpy()-110)
-    # plt.title("u_sum_denorm*1000/15")
-    # plt.show()
-    
-    
-    # plt.figure()
-    # a = prior_delta_y[0,:,0].detach().cpu().numpy()
-    # plt.plot(a, label = "prior_delta_y")
-    # plt.plot( scaler_y.denormalize(y[0,cumulative_window:-horizon,0]).detach().cpu().numpy() - G_bar.numpy(), label = "denorm y - G_bar")
-    # plt.plot( delta_y_max_denorm[0,:,0].detach().cpu().numpy(), label = "delta_y_max_denorm")
-    # plt.plot(500*torch.abs(error[0,:,0]).detach().numpy(), label = "error")
-    # plt.plot(G_bar - scaler_y.denormalize(y_hat[0,:,0]).detach().cpu().numpy(), label = "G_bar - scaler_y.denormalize(y_hat)")
-    # plt.legend()
-    # plt.show()
-
-
-    if return_debug:
-        return loss_mono, delta_y_denorm, prior_delta_y, error, penality
-    else:
-        return loss_mono
-    
 
 def monotonic_gain_loss(y_hat, u, scaler_y, scaler_u, y, evaluate = 'meal', cumulative_window = 12*1.5, horizon=12*1.5, 
                         aggressive_coeff=0.7, CR = 1.0, CF = 1.0, G_bar = torch.tensor([110]), return_debug=False):
@@ -275,6 +97,68 @@ def monotonic_gain_loss(y_hat, u, scaler_y, scaler_u, y, evaluate = 'meal', cumu
         return loss_mono, delta_y_denorm, prior_delta_y, error, penality
     else:
         return loss_mono
+    
+
+def derivative_loss(y_hat):
+    """
+    Enforces positive gain over a horizon for positive inputs (VECTORIZED).
+    
+    I don't have the true y since this loss is  for the prediction of each SSM not their summed prediction.
+    
+    Args:
+        y_hat: (batch_size, time, output_dim) - predicted output
+        u: (batch_size, time, input_dim) - input signal
+        scaler_y: scaler for output
+        scaler_u: scaler for input
+        evaluate: 'meal' or 'insulin' - whether to evaluate meal (max glucose) or insulin (min glucose)
+        cumulative_window = 12*1.5: number of steps to consider for input sum
+        horizon: number of steps to look ahead for the min-max (default 12*1.5)
+        aggressive_coeff: coefficient to scale the input effect aggressive_coeff * (CF/CR * delta_u_sum_denorm) - delta_y_max_denorm 
+        CR: carbohydrate ratio
+        CF: correction factor
+        G_bar: target glucose level (denormalized)
+    
+    Returns:
+        loss: scalar tensor
+    """
+    
+    def moving_average(signal, window_size=5):
+        """Smoothing convolution"""
+        # (batch, time, features) -> (batch, features, time) per conv1d
+        signal = signal.permute(0, 2, 1)
+        
+        kernel = torch.ones(window_size) / window_size        
+        padding = window_size // 2
+        smoothed = F.conv1d(F.pad(signal, (padding, padding), mode='reflect'), 
+                            kernel.unsqueeze(0).unsqueeze(0))
+        # Pad e convolvi
+        padded = F.pad(signal, (padding, padding), mode='reflect')
+        smoothed = F.conv1d(padded, kernel.unsqueeze(0).unsqueeze(0))
+        
+        smoothed = smoothed.permute(0, 2, 1)
+        return smoothed
+    
+    d = (y_hat[:, 1:, :] - y_hat[:, :-1, :]) # derivative
+    d_s = moving_average(d, window_size=12) # smoothed over 1 hour
+    
+    a_s = (d_s[:,1:,:] - d_s[:,:-1,:])**2 # 2-nd derivative squared
+    
+    q75 = torch.quantile(a_s, 0.75, dim=1)  # (batch, features)
+    mask = a_s > q75[:,None,:]
+    
+    # Media degli outlier per ogni (batch, feature)
+    outlier_means = torch.zeros(a_s.shape[0], a_s.shape[2])
+    for b in range(a_s.shape[0]):
+        for f in range(a_s.shape[2]):
+            outlier_means[b, f] = a_s[b, mask[b, :, f], f].mean()
+    
+    # Media delle medie
+    mean_of_outlier_means = outlier_means.mean()
+    
+    return mean_of_outlier_means * 1e3
+    
+    
+    
 
 
 

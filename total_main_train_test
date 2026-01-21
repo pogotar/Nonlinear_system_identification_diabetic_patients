@@ -12,9 +12,13 @@ import papermill as pm
 # Config
 # -----------------------------
 
-exp_identifier = '5'
+exp_identifier = '44'
 
-folder_model_101 = None
+strategy = 's1'  # 's1'  's2' 's1_s2'
+
+train_or_test = 'train_test'  # 'train_test'  'test'
+
+folder_model_101 = None # '7'
 
 epochs_101 = 2000
 
@@ -37,7 +41,10 @@ TAGS_TO_RUN = ["parameters",
                "s1_def_models",
                "s1_train",
                "s1_test_1",
-               "s1_test_2"
+               "s1_test_2",
+               "s2_def_models",
+               "s2_train",
+               "s2_test"
                ]  # tag delle celle da eseguire
 
 
@@ -50,25 +57,22 @@ FORCE_CPU = True  # True = tutti i pazienti usano solo CPU
 
 # -----------------------------
 
+TAGS_TO_REMOVE = []
+
 if folder_model_101 is None:
-    TAGS_TO_RUN = ["parameters",
-               "imports", 
-               "cl_data",
-               "plot_1",
-               "plot_2",
-               "plot_3",
-               "dataset_101",
-               "define_101",
-               "test_101_I",
-               "test_101_M",
-               "test_101_data_i",
-               "s1_def_models",
-               "s1_train",
-               "s1_test_1",
-               "s1_test_2"
-               ]
+    TAGS_TO_REMOVE += ["train_101_I", "train_101_M"]
+
+if strategy == 's1':
+    TAGS_TO_REMOVE += ["s2_def_models", "s2_train", "s2_test"]
+
+if strategy == 's2':
+    TAGS_TO_REMOVE += ["s1_def_models", "s1_train", "s1_test_1", "s1_test_2"]
     
-    
+if train_or_test == 'test':
+    TAGS_TO_REMOVE += ["train_101_I", "train_101_M", "s1_train", "s2_train"]
+
+TAGS_TO_RUN = [tag for tag in TAGS_TO_RUN if tag not in TAGS_TO_REMOVE]
+
 output_dir = f"./output/exp_{exp_identifier}"
 os.makedirs(output_dir, exist_ok=True)
 
