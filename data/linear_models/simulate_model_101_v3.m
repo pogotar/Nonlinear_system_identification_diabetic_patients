@@ -15,7 +15,7 @@ currend_folder = pwd;
 [path_padre, nome_cartella, ~] = fileparts(currend_folder);
 
 main_folders = ["train", "test"];
-% main_folders = ["test", "train"];
+main_folders = ["test", "train"];
 
 % main_folders = ["test"];
 
@@ -263,6 +263,48 @@ for main_folder = main_folders
                 %%
 
 
+                numerator = norm(G_sim_discreto - G_discreto, 2);
+                denominator = norm(G_discreto - mean(G_discreto), 2);
+                FIT = 100 * (1 - numerator / denominator);
+
+                numerator = norm(G_sim_discreto(1:1440/5) - G_discreto(1:1440/5), 2);
+                denominator = norm(G_discreto(1:1440/5) - mean(G_discreto(1:1440/5)), 2);
+                FIT_1day = 100 * (1 - numerator / denominator);
+
+                % Calculate MSE (Mean Squared Error)
+                MSE = mean((G_sim_discreto - G_discreto).^2);
+
+                carb_plot = zeros(size(carb_intake_discreto));
+
+                for i = 1:15:length(carb_intake_discreto)-15
+                    carb_plot(i) = sum(carb_intake_discreto(i:i+15));
+                end
+
+                carb_plot = carb_plot/1000*Ts; % g
+
+
+                plot_glucose_insulin('meal', carb_plot, 'glucose', G_discreto, 'predicted_glucose', G_sim_discreto, ...
+                    'insulin', injection_discreto, 'title', ['patient:' num2str(k) '  |  FIT: ' num2str(FIT)  '  |  MSE: ' num2str(MSE) ]);
+
+                disp(['patient: ' num2str(k)   '  |  FIT: ' num2str(FIT)  ' |  FIT_1day: ' num2str(FIT_1day)  '  |  MSE: ' num2str(MSE)  '  |  dataset: ' sottocartella{1}])
+
+                [delta_I, idx_i] = max(injection_discreto);
+                delta_I = delta_I * Quest.weight / 6000 * 5;
+                disp(['delat I:  ' num2str(delta_I) ' [U] '])
+                CF = iAP.RCM_param.CFpatientForModel;
+
+
+                [delta_M, idx_m] = max(carb_plot);
+                disp(['delat M:  ' num2str(delta_M)])
+
+
+
+                CRtv = load("CRtv.mat");
+
+
+                %%
+
+
 
                 if strcmp(sottocartella{1}, 'sc_30days_identification_rwgn')
                     % sc_30days_identification_rwgn -> train_batch_1 and
@@ -328,12 +370,14 @@ for main_folder = main_folders
                         row = 1 + 3 * 10 + k;
                         [G_min, idx_min] = min(G_discreto(idx_i:idx_i+6*60/5)); % guarda nelle successive 6 ore
                         delta_G_empirico = G_discreto(idx_i) - G_min;
-                        delta_G_modello = G_sim_discreto(idx_i) - min(G_sim_discreto);
+                        [G_sim_min, idx_sim_min] = min(G_sim_discreto(idx_i:idx_i+6*60/5));
+                        delta_G_modello = G_sim_discreto(idx_i) - G_sim_min;
                         disp(['delta G empirico:  ' num2str(delta_G_empirico)])
                         disp(['delta G formula:  ' num2str(CF * delta_I)])
                         disp(['delta G modello:  ' num2str(delta_G_modello)])
 
-                        disp(['delta t modello:' num2str((idx_min-idx_i)*5)])
+                        disp(['delta t empirico:' num2str((idx_min)*5)])
+                        disp(['delta t modello:' num2str((idx_sim_min)*5)])
 
                         modifiche = struct();
                         modifiche.delta_G_linear_personalized = {row, delta_G_modello};
@@ -343,6 +387,7 @@ for main_folder = main_folders
                         % meal
                         row = 1 + 4 * 10 + k;
                         [G_max, idx_max] = max(G_discreto(idx_m:idx_m+6*60/5)); % guarda nelle successive 6 ore
+                        [G_sim_max, idx_sim_max] = max(G_sim_discreto(idx_m:idx_m+6*60/5)); % guarda nelle successive 6 ore
                         delta_G_empirico = G_max - G_discreto(idx_m) ;
                         delta_G_modello = max(G_sim_discreto) - G_sim_discreto(idx_m);
                         disp(['delta G empirico:  ' num2str(delta_G_empirico)])
@@ -358,7 +403,8 @@ for main_folder = main_folders
 
                         disp(['delta G modello:  ' num2str(delta_G_modello)])
 
-                        disp(['delta t modello:' num2str((idx_max-idx_m)*5)])
+                        disp(['delta t empirico:' num2str((idx_max)*5)])
+                        disp(['delta t modello:' num2str((idx_sim_max)*5)])
 
                         modifiche = struct();
                         modifiche.delta_G_linear_personalized = {row, delta_G_modello};

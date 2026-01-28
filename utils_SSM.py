@@ -1,7 +1,12 @@
 import torch
 import matplotlib.pyplot as plt
 import openpyxl
-
+import torch.nn.functional as F
+from scipy import signal
+import numpy as np
+import torchaudio.functional as F_audio
+import torch
+import torch.nn as nn
 
 
 def set_params(root, exp_identifier=None, folder_model_101=None, epochs = None, epochs_101 = None):
@@ -350,3 +355,147 @@ def FIT_formula(y_true, y_hat):
     FIT = 100 * (1 - numerator / denominator)
     
     return FIT
+
+def moving_average_online(x, window_size, weights_mode='uniform', custom_weights=None):
+    """
+    Weighted moving average causale (online).
+    
+    Args:
+        x: [batch, time, features]
+        window_size: dimensione della finestra
+        weights_mode: 'uniform' o 'custom'
+        custom_weights: tensore di pesi se weights_mode='custom' [window_size]
+    
+    Returns:
+        [batch, time, features]
+    """
+    # x: [batch, time, features]
+    batch, time, features = x.shape
+    device = x.device
+    
+    if weights_mode == 'uniform':
+        weights = torch.ones(window_size, device=device) / window_size
+    elif weights_mode == 'custom':
+        if custom_weights is None:
+            raise ValueError("custom_weights deve essere fornito quando weights_mode='custom'")
+        weights = custom_weights.to(device)
+        if weights.shape[0] != window_size:
+            raise ValueError(f"custom_weights deve avere lunghezza {window_size}")
+        weights = weights  
+    else:
+        raise ValueError(f"weights_mode '{weights_mode}' non riconosciuto")
+    
+    # Prendi il primo elemento temporale
+    first_element = x[:, 0:1, :]  # [batch, 1, features]
+    
+    # Ripetilo window_size - 1 volte
+    padding = first_element.repeat(1, window_size - 1, 1)  # [batch, window_size-1, features]
+    
+    # Concatena il padding con l'input originale
+    x_padded = torch.cat([padding, x], dim=1)  # [batch, time + window_size - 1, features]
+    
+    # Permuta per convoluzione
+    x_padded = x_padded.permute(0, 2, 1)  # [batch, features, time + window_size - 1]
+    
+    # Crea il kernel di convoluzione
+    # weights: [window_size] -> [1, 1, window_size] per conv1d
+    kernel = weights.view(1, 1, window_size)
+    
+    # Replica il kernel per ogni feature
+    kernel = kernel.repeat(features, 1, 1)  # [features, 1, window_size]
+    
+    # Applica convoluzione (groups=features per mantenere le features separate)
+    result = F.conv1d(x_padded, kernel, groups=features, stride=1)
+    
+    return result.permute(0, 2, 1)  # [batch, time, features]
+
+
+
+class butter_filter(nn.Module):
+    def __init__(self, T_sample = 5, T_cut = 90, order=4, btype='low'):
+        """
+        Butterworth filter design using scipy.signal.
+        Args:
+            T_sample: Sampling period (minutes)
+            T_cut: Cutoff period (minutes)
+            order: Order of the filter
+            btype: 'low', 'high', 'bandpass', 'bandstop'
+        """
+        super().__init__()
+        
+        f_sample = 1.0/(T_sample * 60)  # Hz
+        f_cut = 1.0/(T_cut * 60)      # Hz
+        
+        f_nyq = 0.5 * f_sample
+        
+        self.order = order
+        self.batch_size = None
+        
+        self.b_np, self.a_np = signal.butter(order, f_cut / f_nyq, btype='low')
+        self.variables = {'T_sample': T_sample, 'T_cut': T_cut, 'order': order, 'btype': btype, 'b_coeff': self.b_np, 'a_coeff': self.a_np}
+        self.moving_average_online = moving_average_online
+        
+        self.register_buffer('b', torch.tensor(self.b_np, dtype=torch.float32))
+        self.register_buffer('a_neg', torch.tensor(self.a_np, dtype=torch.float32))
+        
+    def _init_buffers(self, batch_size, features, device):
+        """Inizializza i buffer di stato per il batch size"""
+        self.register_buffer('x_hist', torch.zeros(batch_size, self.order, features, device=device, dtype=torch.float32))
+        self.register_buffer('y_hist', torch.zeros(batch_size, self.order, features, device=device, dtype=torch.float32))
+        self.batch_size = batch_size
+        
+    def forward(self, x_n):
+        """
+        x_n: [batch_size, features]
+        Ritorna y_n: [batch_size, features]
+        """
+        # x_hist: [batch_size, order, features]
+        term_b = self.b[0] * x_n + torch.sum(self.b[None, 1:, None] * self.x_hist, dim=1)
+        
+        # a_neg: [6], y_hist: [batch_size, order, features]
+        term_a = torch.sum(self.a_neg[None, 1:, None] * self.y_hist, dim=1)
+        
+        y_n = term_b - term_a  # [batch_size, features]
+        
+        # Aggiorna memoria (shift a sinistra) - IMPORTANTE: mantieni le dimensioni consistenti
+        self.x_hist = torch.cat([x_n[:, None, :], self.x_hist[:, :-1, :]], dim=1)
+        self.y_hist = torch.cat([y_n[:, None, :], self.y_hist[:, :-1, :]], dim=1)
+        
+        return y_n
+
+    def run(self, x_seq):
+        """
+        x_seq: [batch_size, time, features]
+        """
+        batch_size, time_steps, features = x_seq.shape
+        device = x_seq.device
+        
+        # IMPORTANTE: Inizializza i buffer SOLO UNA VOLTA prima del loop
+        if self.batch_size is None or self.batch_size != batch_size:
+            self._init_buffers(batch_size, features, device)
+        else:
+            # Se il batch size è lo stesso, sposta i buffer sul device corretto
+            self.x_hist = self.x_hist.to(device)
+            self.y_hist = self.y_hist.to(device)
+        
+        y_total = torch.zeros_like(x_seq)
+        
+        for t in range(time_steps):
+            x_n = x_seq[:, t, :]  # [batch_size, features]
+            y_total[:, t, :] = self.forward(x_n)
+        
+        return y_total
+    
+    def __call__(self, x_seq):
+        """
+        x_seq: [batch_size, time, features]
+        Richiama run() per processare la sequenza
+        """
+        return self.run(x_seq)
+    
+    def reset(self):
+        """Resetta lo stato del filtro"""
+        if self.batch_size is not None:
+            device = self.x_hist.device
+            self.register_buffer('x_hist', torch.zeros_like(self.x_hist))
+            self.register_buffer('y_hist', torch.zeros_like(self.y_hist))

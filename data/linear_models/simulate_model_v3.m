@@ -385,21 +385,24 @@ for main_folder = main_folders
                         row = 1 + 3 * 10 + k;
                         [G_min, idx_min] = min(G_discreto(idx_i:idx_i+6*60/5)); % guarda nelle successive 6 ore
                         delta_G_empirico = G_discreto(idx_i) - G_min;
-                        delta_G_modello = G_sim_discreto(idx_i) - min(G_sim_discreto);
+                        [G_sim_min, idx_sim_min] = min(G_sim_discreto(idx_i:idx_i+6*60/5));
+                        delta_G_modello = G_sim_discreto(idx_i) - G_sim_min;
                         disp(['delta G empirico:  ' num2str(delta_G_empirico)])
                         disp(['delta G formula:  ' num2str(CF * delta_I)])
                         disp(['delta G modello:  ' num2str(delta_G_modello)])
 
-                        disp(['delta t modello:' num2str((idx_min-idx_i)*5)])
+                        disp(['delta t empirico:' num2str((idx_min)*5)])
+                        disp(['delta t modello:' num2str((idx_sim_min)*5)])
 
                         modifiche = struct();
                         modifiche.delta_G_linear_personalized = {row, delta_G_modello};
-                        modify_xlsx_row_and_column('pavia_results_v3.xlsx', modifiche);
+                        % modify_xlsx_row_and_column('pavia_results_v3.xlsx', modifiche);
 
                     else
                         % meal
                         row = 1 + 4 * 10 + k;
                         [G_max, idx_max] = max(G_discreto(idx_m:idx_m+6*60/5)); % guarda nelle successive 6 ore
+                        [G_sim_max, idx_sim_max] = max(G_sim_discreto(idx_m:idx_m+6*60/5)); % guarda nelle successive 6 ore
                         delta_G_empirico = G_max - G_discreto(idx_m) ;
                         delta_G_modello = max(G_sim_discreto) - G_sim_discreto(idx_m);
                         disp(['delta G empirico:  ' num2str(delta_G_empirico)])
@@ -415,11 +418,12 @@ for main_folder = main_folders
 
                         disp(['delta G modello:  ' num2str(delta_G_modello)])
 
-                        disp(['delta t modello:' num2str((idx_max-idx_m)*5)])
+                        disp(['delta t empirico:' num2str((idx_max)*5)])
+                        disp(['delta t modello:' num2str((idx_sim_max)*5)])
 
                         modifiche = struct();
                         modifiche.delta_G_linear_personalized = {row, delta_G_modello};
-                        modify_xlsx_row_and_column('pavia_results_v3.xlsx', modifiche);
+                        % modify_xlsx_row_and_column('pavia_results_v3.xlsx', modifiche);
 
                     end
 

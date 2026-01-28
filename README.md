@@ -60,23 +60,35 @@ simulate_model_v2_final -> è corretto nel processamento dati in discreto
 | code experiment | description |
 |----|----|
 | exp_3 | baseline, 10 patients initial implementation, \n (look at exp 5, there  were some adjustments to the code) |
-| ==exp_4== | - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 1 |
-| ==exp_5== | - present rwgn  → (utils_SSM  use_noise = True) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 1 |
+| exp_4 | - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 1 |
+| exp_5 | - present rwgn  → (utils_SSM  use_noise = True) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 1 |
 | exp_6 | - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min (insulina, pat i) → 0.4 \n - model_folder_101 = ‘6‘ \n prior loss = 1 |
 | exp_7 | - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min (insulina, pat i) → 0.8 \n - rmax → 0.95 \n - model_folder_101 = ‘6‘ \n prior loss = 1 |
 | exp_8 | copiata da 4 ma prior loss pesata 0.1 \n - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 0.1 |
 | exp_9 | copiata da 4 ma prior loss pesata 0.01 \n - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - only strategy 1 \n - r_min  (insulina, pat i) → 0 \n prior loss = 0.01 |
 | exp_10 | copiata da 9 \n tranne che moltiplicato per 1 e    error > 0, \n 1000 \\\* torch.abs(error),  # errore positivo: 1000 |
 | 1.0 \\\* torch.abs(error)   # errore negativo: pesato1 |    |
-| ) \| |    |
+| ==exp_34== | come 4 ma strategy 1 e anche 2 ora  + test meno forte su insulina (30 g al posto di 60) \n - no rwgn  → (utils_SSM  use_noise = False) \n - prior just on insulin and same fixed regularization for all patients \n - strategy 1 and==2== \n - r_min  (insulina, pat i) → 0 \n - prior loss insulina = 1 \n  \n !!!! da rifare, per sbaglio 200 epoche |
+| exp_44 | come 34 ma prior anche su derivata \n - no rwgn  → (utils_SSM  use_noise = False) \n - strategy 1 \n - r_min  (insulina, pat i) → 0 \n - prior loss insulina = 1 \n - prior derivata (solo insulina) → 1e3 |
+| exp_45 | come 34 ma prior anche su derivata \n - no rwgn  → (utils_SSM  use_noise = False) \n - strategy 1 \n - r_min  (insulina, pat i) → 0 \n - prior loss insulina = 1 \n - prior derivata (solo insulina) → 1e2 |
+| exp_46 | come 34 ma prior anche su derivata \n - no rwgn  → (utils_SSM  use_noise = False) \n - strategy 1 and 2 \n - r_min  (insulina, pat i) → 0 \n - prior loss insulina = 1 \n - prior derivata (solo insulina) → 1e1 |
+| exp_54 | come 34 ma MA alla fine \n - no rwgn  → (utils_SSM  use_noise = False) \n - strategy 1 \n - r_min  (insulina, pat i) → 0 \n !!! dual SSM da mettere a posto se strategy 2 |
+| exp_64 | come 34 ma prior insulina 4h |
+| exp_74 | come 34 ma prior insulina 4h e preprocessamento iob in loss |
+| exp_84 | come 34 \n butterworth filter |
+|    |    |
+
+
+
+fare anche test con picco (guardo la più grande differenza consecutiva tra -1 0, 0 1, 1 2, 2 3)  e salvarlo in results_v4
+
+
 
 pensare se pinball
 
 pensare se iob e quanto mettere di tempo assestamento 4 o 5 ore
 
 pensare se mettere tempo assestamento 4 ore e tenere sum e basta
-
-
 
 se non funziona nulla taglio forza CR (magari mascherandola con pinball loss)
 
@@ -89,12 +101,22 @@ sc_1_day_test_IR_insulin_60g_15h
 10 + sono con il test insulina meno forte
 
 
-
-
 ---
 
 34 → come 4 ma strategy 1 and 2 + test meno forte su insulina (30 g al posto di 60)
 
-
-
 44  come 34 ma con prior su derivata
+
+
+
+
+---
+
+leonardo dice di
+
+
+l2n → tv
+
+l2n → tv e gamma
+
+
