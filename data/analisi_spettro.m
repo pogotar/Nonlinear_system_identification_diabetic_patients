@@ -1,32 +1,29 @@
-%% Analisi ONLINE Finale: Confronto Mediano, Butterworth e Media Mobile
+%% Analisi ONLINE Finale: Confronto Mediano, Butterworth e N-Poli Reali
 clear; clc; close all;
 
 % --- Parametri di Progetto ---
 rootFolder = 'harmonic_curves'; 
-fs = 1 / 300;       % 5 minuti
-
-
-
+fs = 1 / 300;       % Campionamento ogni 300s (5 min)
 N_fft = 1024;       
 
-% 1. Configurazione Filtro Butterworth Causale (Guadagno 1)
+% 1. Configurazione Filtro Butterworth 4° Ordine
+fc = 1/5400;        % Taglio a 1.5 ore
+ordine_butt = 4;         
+[b_butt, a_butt] = butter(ordine_butt, fc/(fs/2), 'low'); 
 
-% Il Plateau: Quel "pavimento" orizzontale è rumore bianco/errore di stima. Iniziava circa a 3⋅10−4 Hz.
-% La Scelta: Abbiamo impostato la frequenza di taglio a 2.0⋅10−4 Hz.
-% 
-%     In termini di periodo: T=1/f≈5000 secondi ≈ 1.4 ore.
-% io modificato a 1 ora e mezza -> 90*60 = 5400 secondi
+% 2. Configurazione Filtro a N-Poli Reali (Sostituisce il 2-poli)
+N_poli_reali = 4;    % Numero di poli (uguale all'ordine Butterworth per confronto equo)
+p = exp(-2*pi*fc/fs); 
 
-fc = 1/5400;        % Taglio identificato per eliminare il plateau
-ordine = 4;         
-[b, a] = butter(ordine, fc/(fs/2), 'low'); 
+% Calcolo ricorsivo del denominatore (1 - p*z^-1)^N
+den_Np = 1;
+for k = 1:N_poli_reali
+    den_Np = conv(den_Np, [1, -p]);
+end
+num_Np = (1-p)^N_poli_reali;  % Guadagno unitario: (1-p)^N
 
-% 2. Filtro Mediano (Killer degli spike)
+% 3. Filtro Mediano (Killer degli spike)
 medWin = 5; 
-
-% 3. Filtro Passabasso Semplice (Media Mobile - Moving Average)
-% Usiamo una finestra di 5 campioni per confrontarla col mediano
-movAvgWin = 4; 
 
 patients = dir(fullfile(rootFolder, 'patient*'));
 
@@ -61,52 +58,54 @@ for i = 1:length(patients)
             i_true = double(data.i_true);
             
             % --- CONFRONTO FILTRI ---
-            % A. Passabasso Semplice (Media Mobile)
-            i_hat_movavg = movmean(i_hat_raw, movAvgWin);
+            % A. Filtro N-Poli Reali (Normalizzato)
+            i_hat_Np = filter(num_Np, den_Np, i_hat_raw);
             
-            % B. Solo Butterworth (Lineare)
-            i_hat_only_butt = filter(b, a, i_hat_raw);
+            % B. Solo Butterworth 4° Ordine
+            i_hat_only_butt = filter(b_butt, a_butt, i_hat_raw);
             
             % C. Cascata Ottimale (Mediano + Butterworth)
             sig_med = medfilt1(i_hat_raw, medWin);
-            i_hat_ottimale = filter(b, a, sig_med);
+            i_hat_ottimale = filter(b_butt, a_butt, sig_med);
             
-            % Calcolo PSD
+            % Calcolo PSD per confronto spettrale
             [pxx_orig, ~] = periodogram(detrend(i_hat_raw), [], N_fft, fs);
-            [pxx_mov, ~] = periodogram(detrend(i_hat_movavg), [], N_fft, fs);
+            [pxx_Np, ~]   = periodogram(detrend(i_hat_Np), [], N_fft, fs);
             [pxx_butt, ~] = periodogram(detrend(i_hat_only_butt), [], N_fft, fs);
-            [pxx_ott, ~] = periodogram(detrend(i_hat_ottimale), [], N_fft, fs);
+            [pxx_ott, ~]  = periodogram(detrend(i_hat_ottimale), [], N_fft, fs);
             
             % --- VISUALIZZAZIONE ---
-            figure('Color', 'w', 'Name', ['Confronto Totale - ' patientID], 'Position', [100 100 1200 850]);
-            t = (0:length(i_hat_raw)-1) * 5 / 60; 
-
-            % SUBPLOT 1: TEMPO (Zoom sugli spike)
+            figure('Color', 'w', 'Name', ['Confronto - ' patientID], 'Position', [100 100 1200 850]);
+            t = (0:length(i_hat_raw)-1) * 5 / 60; % Tempo in ore
+            
+            % SUBPLOT 1: TEMPO
             subplot(2,1,1);
-            plot(t, i_hat_raw, 'Color', [1 0.8 0.8], 'DisplayName', 'Originale (Spikes)'); hold on;
+            plot(t, i_hat_raw, 'Color', [1 0.7 0.7], 'LineWidth', 1.5, 'DisplayName', 'Originale (Spikes)'); hold on;
             plot(t, i_true, 'k', 'LineWidth', 2, 'DisplayName', 'i\_true (REALE)');
-            plot(t, i_hat_movavg, 'c--', 'LineWidth', 1.5, 'DisplayName', 'Passabasso (Media Mobile)');
-            plot(t, i_hat_only_butt, 'm:', 'LineWidth', 1.5, 'DisplayName', 'Solo Butterworth');
+            plot(t, i_hat_Np, 'g--', 'LineWidth', 2, 'DisplayName', [num2str(N_poli_reali), '-Poli Reali']);
+            plot(t, i_hat_only_butt, 'm:', 'LineWidth', 1.5, 'DisplayName', 'Solo Butterworth 4°');
             plot(t, i_hat_ottimale, 'b', 'LineWidth', 2, 'DisplayName', 'MEDIANO + BUTTERWORTH');
             title(['Paziente: ' patientID ' - Analisi Temporale']);
             ylabel('Ampiezza'); grid on; legend('Location', 'best');
-
-            % SUBPLOT 2: FREQUENZA (Abbattimento rumore)
+            
+            % SUBPLOT 2: FREQUENZA
             subplot(2,1,2);
-            plot(f, m_ref_db, 'Color', [0.3 0.3 0.3], 'LineWidth', 2, 'DisplayName', 'Target (Media Altri)'); hold on;
-            plot(f, 10*log10(pxx_orig), 'r:', 'DisplayName', 'PSD i\_hat Originale');
-            plot(f, 10*log10(pxx_mov), 'c--', 'DisplayName', 'PSD Media Mobile');
+            plot(f, m_ref_db, 'Color', [0.3 0.3 0.3], 'LineWidth', 2, 'DisplayName', 'Target'); hold on;
+            plot(f, 10*log10(pxx_orig), 'r:', 'DisplayName', 'PSD Originale');
+            plot(f, 10*log10(pxx_Np), 'g--', 'LineWidth', 2, 'DisplayName', ['PSD ', num2str(N_poli_reali), '-Poli Reali']);
             plot(f, 10*log10(pxx_ott), 'b', 'LineWidth', 2, 'DisplayName', 'PSD Ottimale');
             
             set(gca, 'XScale', 'log');
-            title('Confronto Spettrale: Perché la cascata è superiore?');
+            title('Confronto Spettrale: N-Poli Reali vs Butterworth');
             xlabel('Frequenza (Hz)'); ylabel('Potenza (dB/Hz)'); grid on;
             legend('Location', 'southwest');
         end
     end
 end
 
-
-%% Analisi Poli-Zeri (Mappa del Filtro Sviluppato)
-TF = tf(b, a, 1/fs); 
-figure; pzmap(TF); title('Mappa Poli-Zeri del Filtro Online');
+%% Analisi Poli-Zeri di Confronto
+figure('Name', 'Mappa Poli-Zeri Filtri Finali', 'Color', 'w');
+subplot(1,2,1); pzmap(tf(num_Np, den_Np, 1/fs)); 
+title([num2str(N_poli_reali), ' Poli Reali Sovrapposti']);
+subplot(1,2,2); pzmap(tf(b_butt, a_butt, 1/fs)); 
+title(['Butterworth ', num2str(ordine_butt), '° Ordine']);

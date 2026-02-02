@@ -1,145 +1,102 @@
-%% Confronto Low-pass Filter vs Media Mobile vs Combinato
+%% Analisi Comparativa: Filtri IIR, FIR e Butterworth (Guadagno Unitario)
 clear; close all; clc;
 
-%% Parametri dei poli (cambia questi valori)
-pole1 = 0.7;  % Primo polo
-pole2 = 0.7;  % Secondo polo
+% --- Parametri di Progetto ---
+n_samples = 80;                 % Lunghezza della simulazione
+n = 0:n_samples-1;              
+pole_val = 0.8;                 % Valore dei poli reali per H1 (più vicino a 1 = più smoothing)
+N_avg = 4;                      % Finestra Media Mobile per H2
+Wn_butt = 0.15;                 % Frequenza di taglio Butterworth (normalizzata 0-1)
+order_butt = 4;                 % Ordine del Butterworth
 
-%% Parametri filtro media mobile
-N_avg = 2;  % Numero di campioni per la media
+% --- 1. Filtro H1: Due Poli Reali (Normalizzato per Guadagno 1) ---
+% Formula: H(z) = (1-p)^2 / (1 - p*z^-1)^2
+G_lp = (1 - pole_val)^2;
+num_H1 = G_lp;
+den_H1 = [1, -2*pole_val, pole_val^2];
 
-%% H1: Low-pass Filter
-% H1(z) = G / (1 - a1*z^-1 - a2*z^-2)
-a1_lp = pole1 + pole2;
-a2_lp = -pole1 * pole2;
-G_lp = 1;  % Guadagno
-
-num_H1 = [G_lp];
-den_H1 = [1, -a1_lp, -a2_lp];
-H1 = tf(num_H1, den_H1, 1);
-
-fprintf('===== H1: Low-pass Filter =====\n');
-fprintf('Poli: %.4f, %.4f\n', pole1, pole2);
-disp(H1);
-
-%% H2: Filtro Media Mobile (Moving Average)
-% H2(z) = (1 + z^-1 + z^-2 + ... + z^-N) / N
+% --- 2. Filtro H2: Media Mobile (Normalizzato per Guadagno 1) ---
 num_H2 = ones(1, N_avg) / N_avg;
 den_H2 = 1;
-H2 = tf(num_H2, den_H2, 1);
 
-fprintf('\n===== H2: Media Mobile (N=%d) =====\n', N_avg);
-disp(H2);
+% --- 3. Filtro H3: Cascata H1 * H2 ---
+% La convoluzione dei coefficienti equivale al prodotto delle FT
+num_H3 = conv(num_H1, num_H2);
+den_H3 = conv(den_H1, den_H2);
 
-%% H3: Prodotto di H1 e H2 (in cascata)
-H3 = H1 * H2;
+% --- 4. Filtro H4: Butterworth 4° Ordine ---
+[b4, a4] = butter(order_butt, Wn_butt, 'low');
 
-fprintf('\n===== H3: Low-pass + Media Mobile (Combinato) =====\n');
-disp(H3);
+% Creazione oggetti Transfer Function per mappe poli-zeri
+H1_tf = tf(num_H1, den_H1, 1);
+H2_tf = tf(num_H2, den_H2, 1);
+H3_tf = tf(num_H3, den_H3, 1);
+H4_tf = tf(b4, a4, 1);
 
-%% Plot Pole-Zero Map
-figure('Position', [100 100 1600 600]);
+% ==========================================================
+% FIGURE 1: Mappe Poli e Zeri
+% ==========================================================
+figure('Name', 'Mappe Poli-Zeri', 'Position', [100, 100, 1500, 400], 'Color', 'w');
+tfs = {H1_tf, H2_tf, H3_tf, H4_tf};
+titles = {'H1: 2 Poli Reali', ['H2: Media Mobile (N=',num2str(N_avg),')'], 'H3: Cascata H1*H2', 'H4: Butterworth 4° Ordine'};
 
-subplot(1, 3, 1);
-pzmap(H1);
-title('H1: Low-pass (Poli)', 'FontSize', 12, 'FontWeight', 'bold');
-grid on; axis equal;
-xlim([-1.5 1.5]); ylim([-1.5 1.5]);
+for i = 1:4
+    subplot(1, 4, i);
+    pzmap(tfs{i});
+    grid on; axis equal;
+    title(titles{i}, 'FontSize', 10);
+end
 
-subplot(1, 3, 2);
-pzmap(H2);
-title(sprintf('H2: Media Mobile (N=%d)', N_avg), 'FontSize', 12, 'FontWeight', 'bold');
-grid on; axis equal;
-xlim([-1.5 1.5]); ylim([-1.5 1.5]);
-
-subplot(1, 3, 3);
-pzmap(H3);
-title('H3: H1 * H2 (Combinato)', 'FontSize', 12, 'FontWeight', 'bold');
-grid on; axis equal;
-xlim([-1.5 1.5]); ylim([-1.5 1.5]);
-
-%% Risposta in frequenza (Bode plot)
-figure('Position', [100 750 1600 600]);
-
-% Estraiamo i coefficienti da H3 (oggetto tf) per usarli con freqz
-[num_H3, den_H3] = tfdata(H3, 'v'); 
-
-% Frequenze normalizzate
-[H1_resp, w] = freqz(num_H1, den_H1, 512);
-[H2_resp, ~] = freqz(num_H2, den_H2, 512);
-[H3_resp, ~] = freqz(num_H3, den_H3, 512); % Ora passiamo i coefficienti
-% Converti in dB
-mag_H1_dB = 20*log10(abs(H1_resp) + 1e-10);
-mag_H2_dB = 20*log10(abs(H2_resp) + 1e-10);
-mag_H3_dB = 20*log10(abs(H3_resp) + 1e-10);
+% ==========================================================
+% FIGURE 2: Risposta in Frequenza (Bode)
+% ==========================================================
+figure('Name', 'Risposta in Frequenza', 'Position', [150, 150, 1200, 700], 'Color', 'w');
+[h1_r, w] = freqz(num_H1, den_H1, 1024);
+[h2_r, ~] = freqz(num_H2, den_H2, 1024);
+[h3_r, ~] = freqz(num_H3, den_H3, 1024);
+[h4_r, ~] = freqz(b4, a4, 1024);
 
 subplot(2, 1, 1);
-plot(w/pi, mag_H1_dB, 'b-', 'LineWidth', 2); hold on;
-plot(w/pi, mag_H2_dB, 'g-', 'LineWidth', 2);
-plot(w/pi, mag_H3_dB, 'r-', 'LineWidth', 2);
-xlabel('Frequenza Normalizzata (×π rad/sample)', 'FontSize', 11);
-ylabel('Magnitudo (dB)', 'FontSize', 11);
-title('Risposta in Frequenza: Magnitudo', 'FontSize', 12, 'FontWeight', 'bold');
-legend('H1: Low-pass', sprintf('H2: Media Mobile (N=%d)', N_avg), 'H3: Combinato', 'FontSize', 10);
-grid on;
+plot(w/pi, 20*log10(abs(h1_r)+1e-10), 'b', 'LineWidth', 1.5); hold on;
+plot(w/pi, 20*log10(abs(h2_r)+1e-10), 'g', 'LineWidth', 1.5);
+plot(w/pi, 20*log10(abs(h3_r)+1e-10), 'r', 'LineWidth', 2);
+plot(w/pi, 20*log10(abs(h4_r)+1e-10), 'm--', 'LineWidth', 2);
+grid on; ylabel('Magnitudo (dB)'); ylim([-60 5]);
+title('Risposta in Ampiezza (Tutti partono da 0 dB)');
+legend('H1 (Reali)', 'H2 (MA)', 'H3 (Cascata)', 'H4 (Butterworth)', 'Location', 'southwest');
 
 subplot(2, 1, 2);
-phase_H1_deg = angle(H1_resp) * 180/pi;
-phase_H2_deg = angle(H2_resp) * 180/pi;
-phase_H3_deg = angle(H3_resp) * 180/pi;
-plot(w/pi, phase_H1_deg, 'b-', 'LineWidth', 2); hold on;
-plot(w/pi, phase_H2_deg, 'g-', 'LineWidth', 2);
-plot(w/pi, phase_H3_deg, 'r-', 'LineWidth', 2);
-xlabel('Frequenza Normalizzata (×π rad/sample)', 'FontSize', 11);
-ylabel('Fase (gradi)', 'FontSize', 11);
-title('Risposta in Frequenza: Fase', 'FontSize', 12, 'FontWeight', 'bold');
-legend('H1: Low-pass', sprintf('H2: Media Mobile (N=%d)', N_avg), 'H3: Combinato', 'FontSize', 10);
-grid on;
+plot(w/pi, unwrap(angle(h1_r))*180/pi, 'b'); hold on;
+plot(w/pi, unwrap(angle(h2_r))*180/pi, 'g');
+plot(w/pi, unwrap(angle(h3_r))*180/pi, 'r', 'LineWidth', 2);
+plot(w/pi, unwrap(angle(h4_r))*180/pi, 'm--', 'LineWidth', 2);
+grid on; ylabel('Fase (gradi)'); xlabel('Frequenza Normalizzata (\times\pi rad/sample)');
+title('Risposta in Fase');
 
-%% Risposta a impulso singolo
-figure('Position', [100 1450 1600 600]);
+% ==========================================================
+% FIGURE 3: Risposta all'Impulso con Confronto Originale
+% ==========================================================
+figure('Name', 'Risposta Temporale all''Impulso', 'Position', [200, 200, 1500, 450], 'Color', 'w');
+impulse_sig = [1, zeros(1, n_samples-1)]; % Impulso unitario a t=0
 
-% Impulso unitario
-n = 0:70;
-impulse_sig = [zeros(1, 20) 1 zeros(1, 50)];
+y_results = {filter(num_H1, den_H1, impulse_sig), ...
+             filter(num_H2, den_H2, impulse_sig), ...
+             filter(num_H3, den_H3, impulse_sig), ...
+             filter(b4, a4, impulse_sig)};
+colors = {'b', 'g', 'r', 'm'};
 
-% Filtra l'impulso
-y_H1 = filter(num_H1, den_H1, impulse_sig);
-y_H2 = filter(num_H2, den_H2, impulse_sig);
+for i = 1:4
+    subplot(1, 4, i);
+    % Disegna l'impulso originale come riferimento (nero tratteggiato)
+    stem(n(1:40), impulse_sig(1:40), 'k--', 'LineWidth', 1, 'Marker', 'none'); hold on;
+    % Disegna l'uscita del filtro
+    stem(n(1:40), y_results{i}(1:40), colors{i}, 'filled', 'LineWidth', 1.5);
+    
+    grid on; title(titles{i});
+    xlabel('Campioni (n)'); ylabel('Ampiezza');
+    legend('Impulso Originale', 'Segnale Filtrato', 'FontSize', 8);
+    % Imposta limiti fissi per facilitare il confronto visivo
+    ylim([-0.1 1.1]); 
+end
 
-% H3: applica H1 poi H2 in cascata
-y_H3 = filter(num_H1, den_H1, impulse_sig);
-y_H3 = filter(num_H2, den_H2, y_H3);
-
-subplot(1, 3, 1);
-stem(n, y_H1, 'b', 'filled'); hold on;
-stem(n, impulse_sig, 'k--', 'LineWidth', 1.5);
-xlabel('Campione', 'FontSize', 11);
-ylabel('Ampiezza', 'FontSize', 11);
-title('H1: Low-pass - Impulso', 'FontSize', 12, 'FontWeight', 'bold');
-legend('Output H1', 'Impulso', 'FontSize', 10);
-grid on;
-
-subplot(1, 3, 2);
-stem(n, y_H2, 'g', 'filled'); hold on;
-stem(n, impulse_sig, 'k--', 'LineWidth', 1.5);
-xlabel('Campione', 'FontSize', 11);
-ylabel('Ampiezza', 'FontSize', 11);
-title(sprintf('H2: Media Mobile (N=%d) - Impulso', N_avg), 'FontSize', 12, 'FontWeight', 'bold');
-legend('Output H2', 'Impulso', 'FontSize', 10);
-grid on;
-
-subplot(1, 3, 3);
-stem(n, y_H3, 'r', 'filled'); hold on;
-stem(n, impulse_sig, 'k--', 'LineWidth', 1.5);
-xlabel('Campione', 'FontSize', 11);
-ylabel('Ampiezza', 'FontSize', 11);
-title('H3: H1 * H2 - Impulso', 'FontSize', 12, 'FontWeight', 'bold');
-legend('Output H3', 'Impulso', 'FontSize', 10);
-grid on;
-
-fprintf('\n===== OSSERVAZIONI =====\n');
-fprintf('H1: Impulso passa grande, coda lunga\n');
-fprintf('H2: Impulso attenuato subito (diviso per N)\n');
-fprintf('H3: Combinazione - attenuazione immediata + coda lunga\n');
-
+fprintf('Analisi terminata. Tutti i filtri hanno guadagno unitario in DC.\n');

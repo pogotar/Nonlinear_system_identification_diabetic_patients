@@ -411,91 +411,85 @@ def moving_average_online(x, window_size, weights_mode='uniform', custom_weights
 
 
 
-class butter_filter(nn.Module):
-    def __init__(self, T_sample = 5, T_cut = 90, order=4, btype='low'):
-        """
-        Butterworth filter design using scipy.signal.
-        Args:
-            T_sample: Sampling period (minutes)
-            T_cut: Cutoff period (minutes)
-            order: Order of the filter
-            btype: 'low', 'high', 'bandpass', 'bandstop'
-        """
+class LowPassFilter(nn.Module):
+    def __init__(self, T_sample=5, T_cut=90, order=4, mode='butter'):
         super().__init__()
         
-        f_sample = 1.0/(T_sample * 60)  # Hz
-        f_cut = 1.0/(T_cut * 60)      # Hz
-        
+        f_sample = 1.0 / (T_sample * 60)
+        f_cut = 1.0 / (T_cut * 60)
         f_nyq = 0.5 * f_sample
+        Wn = f_cut / f_nyq
         
         self.order = order
+        self.mode = mode
         self.batch_size = None
-        
-        self.b_np, self.a_np = signal.butter(order, f_cut / f_nyq, btype='low')
-        self.variables = {'T_sample': T_sample, 'T_cut': T_cut, 'order': order, 'btype': btype, 'b_coeff': self.b_np, 'a_coeff': self.a_np}
-        self.moving_average_online = moving_average_online
-        
-        self.register_buffer('b', torch.tensor(self.b_np, dtype=torch.float32))
-        self.register_buffer('a_neg', torch.tensor(self.a_np, dtype=torch.float32))
+
+        if mode == 'butter':
+            b_np, a_np = signal.butter(order, Wn, btype='low')
+        elif mode == 'real_poles':
+            p = np.exp(-2 * np.pi * f_cut / f_sample)
+            a_poly = np.array([1.0])
+            for _ in range(order):
+                a_poly = np.convolve(a_poly, np.array([1.0, -p]))
+            a_np = a_poly
+            b_np = np.zeros(order + 1)
+            b_np[0] = (1 - p)**order 
+        else:
+            raise ValueError("Mode deve essere 'butter' o 'real_poles'")
+
+        self.register_buffer('b', torch.tensor(b_np, dtype=torch.float32))
+        self.register_buffer('a_neg', torch.tensor(a_np, dtype=torch.float32))
         
     def _init_buffers(self, batch_size, features, device):
-        """Inizializza i buffer di stato per il batch size"""
-        self.register_buffer('x_hist', torch.zeros(batch_size, self.order, features, device=device, dtype=torch.float32))
-        self.register_buffer('y_hist', torch.zeros(batch_size, self.order, features, device=device, dtype=torch.float32))
+        """Crea i buffer vuoti (verranno riempiti dal reset)"""
+        self.register_buffer('x_hist', torch.zeros(batch_size, self.order, features, device=device))
+        self.register_buffer('y_hist', torch.zeros(batch_size, self.order, features, device=device))
         self.batch_size = batch_size
         
+    def reset(self, initial_value):
+        """
+        Inizializza i buffer con il valore iniziale fornito.
+        initial_value: [batch_size, features]
+        """
+        # Creiamo un tensore [batch_size, order, features] espandendo il valore iniziale
+        # initial_value[:, None, :] aggiunge la dimensione 'order'
+        fill_value = initial_value[:, None, :].expand(-1, self.order, -1).contiguous()
+        
+        self.x_hist = fill_value.clone()
+        self.y_hist = fill_value.clone()
+
     def forward(self, x_n):
-        """
-        x_n: [batch_size, features]
-        Ritorna y_n: [batch_size, features]
-        """
-        # x_hist: [batch_size, order, features]
+        # 1. Parte MA
         term_b = self.b[0] * x_n + torch.sum(self.b[None, 1:, None] * self.x_hist, dim=1)
         
-        # a_neg: [6], y_hist: [batch_size, order, features]
+        # 2. Parte AR
         term_a = torch.sum(self.a_neg[None, 1:, None] * self.y_hist, dim=1)
         
-        y_n = term_b - term_a  # [batch_size, features]
+        y_n = term_b - term_a
         
-        # Aggiorna memoria (shift a sinistra) - IMPORTANTE: mantieni le dimensioni consistenti
+        # 3. Shift registri
         self.x_hist = torch.cat([x_n[:, None, :], self.x_hist[:, :-1, :]], dim=1)
         self.y_hist = torch.cat([y_n[:, None, :], self.y_hist[:, :-1, :]], dim=1)
         
         return y_n
 
     def run(self, x_seq):
-        """
-        x_seq: [batch_size, time, features]
-        """
+        """Processa la sequenza chiamando automaticamente il reset sul primo valore"""
         batch_size, time_steps, features = x_seq.shape
         device = x_seq.device
         
-        # IMPORTANTE: Inizializza i buffer SOLO UNA VOLTA prima del loop
-        if self.batch_size is None or self.batch_size != batch_size:
+        # Inizializzazione struttura se batch_size cambia
+        if self.batch_size != batch_size:
             self._init_buffers(batch_size, features, device)
-        else:
-            # Se il batch size è lo stesso, sposta i buffer sul device corretto
-            self.x_hist = self.x_hist.to(device)
-            self.y_hist = self.y_hist.to(device)
+        
+        # AUTO-RESET: riempie x_hist e y_hist con x_seq[:, 0, :]
+        self.reset(x_seq[:, 0, :])
         
         y_total = torch.zeros_like(x_seq)
-        
         for t in range(time_steps):
-            x_n = x_seq[:, t, :]  # [batch_size, features]
-            y_total[:, t, :] = self.forward(x_n)
+            y_total[:, t, :] = self.forward(x_seq[:, t, :])
         
         return y_total
     
     def __call__(self, x_seq):
-        """
-        x_seq: [batch_size, time, features]
-        Richiama run() per processare la sequenza
-        """
         return self.run(x_seq)
-    
-    def reset(self):
-        """Resetta lo stato del filtro"""
-        if self.batch_size is not None:
-            device = self.x_hist.device
-            self.register_buffer('x_hist', torch.zeros_like(self.x_hist))
-            self.register_buffer('y_hist', torch.zeros_like(self.y_hist))

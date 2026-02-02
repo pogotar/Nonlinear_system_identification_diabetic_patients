@@ -75,8 +75,9 @@ simulate_model_v2_final -> è corretto nel processamento dati in discreto
 | exp_54 | come 34 ma MA alla fine \n - no rwgn  → (utils_SSM  use_noise = False) \n - strategy 1 \n - r_min  (insulina, pat i) → 0 \n !!! dual SSM da mettere a posto se strategy 2 |
 | exp_64 | come 34 ma prior insulina 4h |
 | exp_74 | come 34 ma prior insulina 4h e preprocessamento iob in loss |
-| exp_84 | come 34 \n butterworth filter |
-|    |    |
+| exp_84 | come 34 \n lowpass filter |
+| exp_65 | come 34 ma  \n - prior insulina 4h (come in 64) \n - lowpass (come in 84) |
+| exp_75 | come 34 ma  \n - prior insulina 4h  e preprocessamento iob in loss (come in 74) \n - lowpass (come in 84) |
 
 
 

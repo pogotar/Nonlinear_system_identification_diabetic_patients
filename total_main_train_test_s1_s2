@@ -16,13 +16,13 @@ exp_identifier = '34'
 
 strategy = 's1'  # 's1'  's2' 's1_s2'
 
-train_or_test = 'test'  # 'train_test'  'test'
+train_or_test = 'train_test'  # 'train_test'  'test'
 
 folder_model_101 = None # '7'
 
 epochs_101 = 2000
 
-epochs = 2000
+epochs = 300
 
 ORIG_NB = f"./code/exp_{exp_identifier}/single_main_SSM_new.ipynb"  # notebook sorgente
 TAGS_TO_RUN = ["parameters",
@@ -48,7 +48,7 @@ TAGS_TO_RUN = ["parameters",
                ]  # tag delle celle da eseguire
 
 
-NUM_PATIENTS = 10                 # numero pazienti
+NUM_PATIENTS = list(range(1,1+1))                 # numero pazienti     list(range(1,10+1))
 FORCE_CPU = True  # True = tutti i pazienti usano solo CPU
 
 
@@ -90,7 +90,7 @@ all_devices = gpu_devices + [cpu_device]
 print(f"Tutti i device disponibili: {all_devices}")
 
 
-patients = list(range(1,NUM_PATIENTS+1))
+patients = NUM_PATIENTS
 
 if FORCE_CPU or num_gpus == 0:
     print("Forzando l'uso della CPU per tutti i pazienti.")
