@@ -2,7 +2,7 @@ close all
 
 use_abs_error = 0;
 
-exp_id = [34,44,45,46,54,64,74];
+exp_id = [34,64,74,84,65,75];
 
 
 
@@ -14,8 +14,15 @@ color_formula = [0.2 0.5 0.75];      % Blu pastello      -> formula
 color_ssm = [0.3 0.75 0.4];      % Verde pastello    -> SSM
 
 
-T = readtable('results_v3_peacks.xlsx');
+% 1. Get the default options for the file
+opts = detectImportOptions('results_v3_peacks.xlsx');
 
+% 2. Force all variables to be 'double'
+% This treats any non-numeric text as NaN (Not a Number)
+opts = setvartype(opts, 'double');
+
+% 3. Read the table using those modified options
+T = readtable('results_v3_peacks.xlsx', opts);
 
 %% impulse
 
@@ -25,8 +32,8 @@ p_i_ssm = read_exp(T, exp_id, 21:30, 'p_i_');
 p_m_ssm = read_exp(T, exp_id, 31:40, 'p_m_');
 
 
-p_i_ssm = str2double(p_i_ssm);
-p_m_ssm = str2double(p_m_ssm);
+p_i_ssm = p_i_ssm;
+p_m_ssm = p_m_ssm;
 
 
 %% delta I

@@ -76,14 +76,10 @@ simulate_model_v2_final -> è corretto nel processamento dati in discreto
 | exp_64 | come 34 ma prior insulina 4h |
 | exp_74 | come 34 ma prior insulina 4h e preprocessamento iob in loss |
 | exp_84 | come 34 \n lowpass filter |
-| exp_65 | come 34 ma  \n - prior insulina 4h (come in 64) \n - lowpass (come in 84) |
-| exp_75 | come 34 ma  \n - prior insulina 4h  e preprocessamento iob in loss (come in 74) \n - lowpass (come in 84) |
-
-
+| exp_65 | come 34 ma \n - prior insulina 4h (come in 64) \n - lowpass (come in 84) |
+| exp_75 | come 34 ma \n - prior insulina 4h  e preprocessamento iob in loss (come in 74) \n - lowpass (come in 84) |
 
 fare anche test con picco (guardo la più grande differenza consecutiva tra -1 0, 0 1, 1 2, 2 3)  e salvarlo in results_v4
-
-
 
 pensare se pinball
 
@@ -109,15 +105,79 @@ sc_1_day_test_IR_insulin_60g_15h
 44  come 34 ma con prior su derivata
 
 
-
-
 ---
 
 leonardo dice di
 
-
 l2n → tv
 
 l2n → tv e gamma
+
+
+---
+
+75
+
+```
+
+config = {
+    
+    'code_identifier' : code_identifier,
+    'exp_identifier' : exp_identifier,
+    'timestamp': datetime.now().isoformat(),
+    
+    # ===== EPOCHS =====
+    'epochs_101': 2000,
+    'epochs_s1' : 2000,
+    'epochs_s2' : 1000,
+    
+    # ===== HYPERPARAMETERS =====
+    'learning_rate' : 1e-3,
+    'use_noise' : False,
+    
+    # ===== monotonic gain loss =====
+    'use_monotonic_gain_loss' : True,
+    'cumulative_window' : 12*4,             # 12*2.5    12*4    !!!!!
+    'horizon' : 12*0.5,
+    'type_preprocess_insulino' : 'iob',      # 'sum'   'iob'    !!!!!!
+    
+    # ===== monotonic gain loss =====
+    'use_low_pass_I' : True,   # per ora implementato solo in strategy 1
+    
+}
+```
+
+
+---
+
+84
+
+```
+config = {
+    
+    'code_identifier' : code_identifier,
+    'exp_identifier' : exp_identifier,
+    'timestamp': datetime.now().isoformat(),
+    
+    # ===== EPOCHS =====
+    'epochs_101': 2000,
+    'epochs_s1' : 2000,
+    'epochs_s2' : 1000,
+    
+    # ===== HYPERPARAMETERS =====
+    'learning_rate' : 1e-3,
+    'use_noise' : False,
+    
+    # ===== monotonic gain loss =====
+    'use_monotonic_gain_loss' : True,
+    'cumulative_window' : 12*2.5,             # 12*2.5    12*4     !!!!!
+    'horizon' : 12*0.5,
+    'type_preprocess_insulin' : 'sum',      # 'sum'   'iob'
+    
+    # ===== monotonic gain loss =====
+    'use_low_pass_I' : True,   # per ora implementato solo in strategy 1     !!!!!!
+    
+}
+```
 
 

@@ -1,33 +1,34 @@
-%% Analisi ONLINE Finale: Confronto Mediano, Butterworth e N-Poli Reali
+%% Final ONLINE Analysis: Comparison between SSM, Real G, and N-Real Poles
 clear; clc; close all;
 
-% --- Parametri di Progetto ---
+% --- Design Parameters ---
 rootFolder = 'harmonic_curves'; 
-fs = 1 / 300;       % Campionamento ogni 300s (5 min)
+fs = 1 / 300;       % Sampling every 300s (5 min)
 N_fft = 1024;       
 
-% 1. Configurazione Filtro Butterworth 4° Ordine
-fc = 1/5400;        % Taglio a 1.5 ore
-ordine_butt = 4;         
-[b_butt, a_butt] = butter(ordine_butt, fc/(fs/2), 'low'); 
+% 1. 4th Order Butterworth Filter Configuration
+fc = 1/5400;        % Cutoff at 1.5 hours
+order_butt = 4;         
+[b_butt, a_butt] = butter(order_butt, fc/(fs/2), 'low'); 
 
-% 2. Configurazione Filtro a N-Poli Reali (Sostituisce il 2-poli)
-N_poli_reali = 4;    % Numero di poli (uguale all'ordine Butterworth per confronto equo)
+% 2. N-Real Poles Filter Configuration
+N_poli_reali = 4;    % Number of poles (equal to Butterworth order for fair comparison)
 p = exp(-2*pi*fc/fs); 
 
-% Calcolo ricorsivo del denominatore (1 - p*z^-1)^N
+% Recursive calculation of the denominator (1 - p*z^-1)^N
 den_Np = 1;
 for k = 1:N_poli_reali
     den_Np = conv(den_Np, [1, -p]);
 end
-num_Np = (1-p)^N_poli_reali;  % Guadagno unitario: (1-p)^N
+num_Np = (1-p)^N_poli_reali;  % Unit gain: (1-p)^N
 
-% 3. Filtro Mediano (Killer degli spike)
+% 3. Median Filter (Spike Killer)
 medWin = 5; 
 
 patients = dir(fullfile(rootFolder, 'patient*'));
 
-%% --- Calcolo Preliminare della Media di Riferimento ---
+%% --- Preliminary Calculation of the Reference Average (Target) ---
+% Analyzing the spectral dynamics of all real signals to create a "Target" PSD
 psd_ref_list = [];
 for i = 1:length(patients)
     filePath = fullfile(rootFolder, patients(i).name, 'curves.mat');
@@ -35,6 +36,7 @@ for i = 1:length(patients)
         data = load(filePath);
         vars = fieldnames(data);
         for v = 1:length(vars)
+            % Exclude 'i_hat' to create a clean reference target
             if ~strcmp(vars{v}, 'i_hat')
                 sig = detrend(double(data.(vars{v})));
                 [pxx, f] = periodogram(sig, [], N_fft, fs);
@@ -45,7 +47,7 @@ for i = 1:length(patients)
 end
 m_ref_db = 10*log10(mean(psd_ref_list, 2));
 
-%% --- Loop Principale per Paziente ---
+%% --- Main Loop per Patient ---
 for i = 1:length(patients)
     patientID = patients(i).name;
     filePath = fullfile(rootFolder, patientID, 'curves.mat');
@@ -57,55 +59,64 @@ for i = 1:length(patients)
             i_hat_raw = double(data.i_hat);
             i_true = double(data.i_true);
             
-            % --- CONFRONTO FILTRI ---
-            % A. Filtro N-Poli Reali (Normalizzato)
+            % --- FILTER COMPARISON ---
+            % A. N-Real Poles Filter (Normalized)
             i_hat_Np = filter(num_Np, den_Np, i_hat_raw);
             
-            % B. Solo Butterworth 4° Ordine
+            % B. Only 4th Order Butterworth
             i_hat_only_butt = filter(b_butt, a_butt, i_hat_raw);
             
-            % C. Cascata Ottimale (Mediano + Butterworth)
+            % C. Optimal Cascade (Median + Butterworth)
             sig_med = medfilt1(i_hat_raw, medWin);
             i_hat_ottimale = filter(b_butt, a_butt, sig_med);
             
-            % Calcolo PSD per confronto spettrale
+            % PSD Calculation for Spectral Comparison
             [pxx_orig, ~] = periodogram(detrend(i_hat_raw), [], N_fft, fs);
             [pxx_Np, ~]   = periodogram(detrend(i_hat_Np), [], N_fft, fs);
             [pxx_butt, ~] = periodogram(detrend(i_hat_only_butt), [], N_fft, fs);
             [pxx_ott, ~]  = periodogram(detrend(i_hat_ottimale), [], N_fft, fs);
             
-            % --- VISUALIZZAZIONE ---
-            figure('Color', 'w', 'Name', ['Confronto - ' patientID], 'Position', [100 100 1200 850]);
-            t = (0:length(i_hat_raw)-1) * 5 / 60; % Tempo in ore
+            % --- VISUALIZATION ---
+            figure('Color', 'w', 'Name', ['Comparison - ' patientID], 'Position', [100 100 1200 850]);
+            t = (0:length(i_hat_raw)-1) * 5 / 60; % Time in hours
             
-            % SUBPLOT 1: TEMPO
+            % SUBPLOT 1: TIME DOMAIN
             subplot(2,1,1);
-            plot(t, i_hat_raw, 'Color', [1 0.7 0.7], 'LineWidth', 1.5, 'DisplayName', 'Originale (Spikes)'); hold on;
-            plot(t, i_true, 'k', 'LineWidth', 2, 'DisplayName', 'i\_true (REALE)');
-            plot(t, i_hat_Np, 'g--', 'LineWidth', 2, 'DisplayName', [num2str(N_poli_reali), '-Poli Reali']);
-            plot(t, i_hat_only_butt, 'm:', 'LineWidth', 1.5, 'DisplayName', 'Solo Butterworth 4°');
-            plot(t, i_hat_ottimale, 'b', 'LineWidth', 2, 'DisplayName', 'MEDIANO + BUTTERWORTH');
-            title(['Paziente: ' patientID ' - Analisi Temporale']);
-            ylabel('Ampiezza'); grid on; legend('Location', 'best');
+            plot(t, i_hat_raw, 'Color', [0.7 0.3 0.3], 'LineWidth', 2, 'DisplayName', 'SSM prediction'); hold on;
+            plot(t, i_true, 'k', 'LineWidth', 2, 'DisplayName', 'G real');
+            plot(t, i_hat_Np, 'Color', [0.3 0.7 0.3], 'LineWidth', 2, 'DisplayName', [num2str(N_poli_reali), '-real poles']);
             
-            % SUBPLOT 2: FREQUENZA
+            % Commented out per user request:
+            % plot(t, i_hat_only_butt, 'm:', 'LineWidth', 1.5, 'DisplayName', 'Butterworth Only 4th');
+            % plot(t, i_hat_ottimale, 'b', 'LineWidth', 2, 'DisplayName', 'MEDIANO + BUTTERWORTH');
+            
+            title(['Patient: ' patientID ' - Temporal Analysis']);
+            xlabel('Time [hours]');
+            ylabel('Amplitude'); 
+            grid on; 
+            legend('Location', 'best');
+            
+            % SUBPLOT 2: FREQUENCY DOMAIN
             subplot(2,1,2);
-            plot(f, m_ref_db, 'Color', [0.3 0.3 0.3], 'LineWidth', 2, 'DisplayName', 'Target'); hold on;
-            plot(f, 10*log10(pxx_orig), 'r:', 'DisplayName', 'PSD Originale');
-            plot(f, 10*log10(pxx_Np), 'g--', 'LineWidth', 2, 'DisplayName', ['PSD ', num2str(N_poli_reali), '-Poli Reali']);
-            plot(f, 10*log10(pxx_ott), 'b', 'LineWidth', 2, 'DisplayName', 'PSD Ottimale');
+            plot(f, m_ref_db, 'Color', [0.3 0.3 0.7], 'LineWidth', 2, 'DisplayName', 'Avg spectral density realistic scenarios'); hold on;
+            plot(f, 10*log10(pxx_orig),  'Color', [0.7 0.3 0.3],'LineWidth', 2, 'DisplayName', 'SSM prediction');
+            plot(f, 10*log10(pxx_Np), 'Color', [0.3 0.7 0.3], 'LineWidth', 2, 'DisplayName', [ num2str(N_poli_reali), '-Real Poles']);
+            % plot(f, 10*log10(pxx_ott), 'b', 'LineWidth', 2, 'DisplayName', 'Optimal PSD (Hybrid)');
             
             set(gca, 'XScale', 'log');
-            title('Confronto Spettrale: N-Poli Reali vs Butterworth');
-            xlabel('Frequenza (Hz)'); ylabel('Potenza (dB/Hz)'); grid on;
+            title('Spectral Comparison: N-Real Poles vs Butterworth');
+            xlabel('Frequency (Hz)'); 
+            ylabel('Power (dB/Hz)'); 
+            grid on;
             legend('Location', 'southwest');
         end
     end
 end
 
-%% Analisi Poli-Zeri di Confronto
-figure('Name', 'Mappa Poli-Zeri Filtri Finali', 'Color', 'w');
+%% Pole-Zero Comparison Analysis
+figure('Name', 'Pole-Zero Map Comparison', 'Color', 'w');
 subplot(1,2,1); pzmap(tf(num_Np, den_Np, 1/fs)); 
-title([num2str(N_poli_reali), ' Poli Reali Sovrapposti']);
+title([num2str(N_poli_reali), ' Overlapping Real Poles']);
+
 subplot(1,2,2); pzmap(tf(b_butt, a_butt, 1/fs)); 
-title(['Butterworth ', num2str(ordine_butt), '° Ordine']);
+title(['Butterworth Order ', num2str(order_butt)]);

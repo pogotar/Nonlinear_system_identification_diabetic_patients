@@ -1,0 +1,15 @@
+{
+  "code_identifier": "100",
+  "exp_identifier": "34",
+  "timestamp": "2026-02-03T22:06:36.106679",
+  "epochs_101": 2000,
+  "epochs_s1": 2000,
+  "epochs_s2": 1000,
+  "learning_rate": 0.001,
+  "use_noise": false,
+  "use_monotonic_gain_loss": true,
+  "cumulative_window": 30.0,
+  "horizon": 6.0,
+  "type_preprocess_insulin": "sum",
+  "use_low_pass_I": false
+}
