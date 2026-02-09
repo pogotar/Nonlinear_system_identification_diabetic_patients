@@ -1,3 +1,9 @@
+tensorboard --logdir=.\\runs\\exp_101 --port=6006
+
+./ngrok http 6006
+
+
+
 * preprocessing dati esattamente come nella simulazione dei modelli lineari?
 
 fare  ottimizzazioni di meal e insulina separate?

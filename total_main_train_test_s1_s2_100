@@ -13,11 +13,11 @@ from datetime import datetime
 # -----------------------------
 
 code_identifier = '100'
-exp_identifier = '84'
+exp_identifier = '101'
 
-strategy = 's1'  # 's1'  's2' 's1_s2'
+strategy = 's1_s2'  # 's1'  's2' 's1_s2'
 
-train_or_test = 'test'  # 'train_test'  'test'
+train_or_test = 'train_test'  # 'train_test'  'test'
 
 folder_model_101 = None # '7'
 
@@ -30,21 +30,24 @@ config = {
     # ===== EPOCHS =====
     'epochs_101': 2000,
     'epochs_s1' : 2000,
-    'epochs_s2' : 1000,
+    'epochs_s2' : 1200,
     
     # ===== HYPERPARAMETERS =====
     'learning_rate' : 1e-3,
     'use_noise' : False,
-    
+    'loss_type_s1' : 'L1',  #  'L1' 'L2'
+    'loss_type_s2' : 'L1',
+    'prior_weight_s1' : 1 ,
+    'prior_weight_s2' : 1,
+
     # ===== monotonic gain loss =====
     'use_monotonic_gain_loss' : True,
     'cumulative_window' : 12*2.5,             # 12*2.5    12*4
-    'horizon' : 12*4,
+    'horizon' : 12*0.5,
     'type_preprocess_insulin' : 'sum',      # 'sum'   'iob'
     
     # ===== monotonic gain loss =====
-    'use_low_pass_I' : True,   # per ora implementato solo in strategy 1
-    
+    'use_low_pass_I' : True,  
 }
 
 NUM_PATIENTS = list(range(1,10+1))                 # numero pazienti     list(range(1,10+1))
@@ -103,8 +106,13 @@ if train_or_test == 'test':
 
 TAGS_TO_RUN = [tag for tag in TAGS_TO_RUN if tag not in TAGS_TO_REMOVE]
 
-output_dir = f"./output/exp_{exp_identifier}"
-os.makedirs(output_dir, exist_ok=True)
+output_dir_s1 = f"./output_s1/exp_{exp_identifier}"
+output_dir_s2 = f"./output_s2/exp_{exp_identifier}"
+output_dir_s1_s2 = f"./output_s1_s2/exp_{exp_identifier}"
+os.makedirs(output_dir_s1, exist_ok=True)
+os.makedirs(output_dir_s2, exist_ok=True)
+os.makedirs(output_dir_s1_s2, exist_ok=True)
+
 
 # Numero di GPU disponibili
 num_gpus = torch.cuda.device_count()
@@ -196,7 +204,13 @@ def run_notebook_for(patient_id, device, tags_to_run):
         temp_nb_path = tf.name
     try:
         build_temp_notebook(ORIG_NB, tags_to_run, temp_nb_path)
-        out_nb = os.path.join(f"./output/exp_{exp_identifier}", f"train_patient_{patient_id}_{device.replace(':','_')}.ipynb")
+        if strategy == 's1':
+            out_nb = os.path.join(f"./output_s1/exp_{exp_identifier}", f"train_patient_{patient_id}_{device.replace(':','_')}.ipynb")
+        elif strategy == 's2':
+            out_nb = os.path.join(f"./output_s2/exp_{exp_identifier}", f"train_patient_{patient_id}_{device.replace(':','_')}.ipynb")
+        elif strategy == 's1_s2':
+            out_nb = os.path.join(f"./output_s1_s2/exp_{exp_identifier}", f"train_patient_{patient_id}_{device.replace(':','_')}.ipynb")
+
         print(f"[launch] patient {patient_id} on {device} -> {out_nb}  and exp {exp_identifier}")
         pm.execute_notebook(
             temp_nb_path,

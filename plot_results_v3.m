@@ -2,7 +2,7 @@ close all
 
 use_abs_error = 0;
 
-exp_id = [34,64,74,84,65,75];
+exp_id = [84,65,75];
 
 
 
